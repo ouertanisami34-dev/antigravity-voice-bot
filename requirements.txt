@@ -2,4 +2,3 @@ py-cord[voice]
 SpeechRecognition
 gTTS
 PyNaCl
-gradio
