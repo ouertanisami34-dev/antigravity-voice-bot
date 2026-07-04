@@ -1,11 +1,10 @@
 import asyncio
 import discord
-from discord.ext import commands
-from gtts import gTTS
+import yt_dlp
 import os
 import sys
-import urllib.request
-import json
+import collections
+import datetime
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -17,183 +16,336 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Antigravity Voice Bot is running!")
+        self.wfile.write(b"Antigravity Music Bot OK")
     def log_message(self, format, *args):
         pass
 
-def start_health_server():
-    server = HTTPServer(("0.0.0.0", 8000), HealthHandler)
-    server.serve_forever()
-
-threading.Thread(target=start_health_server, daemon=True).start()
-print("Serveur web lance sur le port 8000", flush=True)
+port = int(os.environ.get("PORT", 8000))
+threading.Thread(
+    target=lambda: HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever(),
+    daemon=True
+).start()
+print(f"[BOOT] Serveur web sur le port {port}", flush=True)
 
 # ============================================================
-# Configuration du bot Discord
+# Configuration
 # ============================================================
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-CLOUDFLARE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
-
 if not TOKEN:
-    print("Erreur: DISCORD_BOT_TOKEN non trouve", file=sys.stderr, flush=True)
-    sys.exit(1)
+    sys.exit("DISCORD_BOT_TOKEN manquant")
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
-intents.guilds = True
-intents.members = True
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-voice_client = None
+bot = discord.Bot(intents=intents)
 
 # ============================================================
-# Appel de l'API Cloudflare Worker
+# yt-dlp et FFmpeg
 # ============================================================
-def query_cloudflare(user_id, username, question):
-    payload = {"user_id": str(user_id), "username": username, "question": question}
-    req = urllib.request.Request(
-        CLOUDFLARE_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "AntigravityVoiceBot/1.0"},
-        method="POST"
+YTDL_OPTS = {
+    'format': 'bestaudio[acodec=opus]/bestaudio/best',
+    'noplaylist': True,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'ytsearch',
+    'source_address': '0.0.0.0',
+    'nocheckcertificate': True,
+    'geo_bypass': True,
+    'extractor_args': {'youtube': {'player_client': ['web']}},
+}
+
+FFMPEG_OPTS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn',
+}
+
+ytdl = yt_dlp.YoutubeDL(YTDL_OPTS)
+
+# ============================================================
+# Etat par serveur
+# ============================================================
+queues = {}
+now_playing = {}
+volumes = {}
+
+def get_queue(gid):
+    return queues.setdefault(gid, collections.deque())
+
+def get_vol(gid):
+    return volumes.get(gid, 0.5)
+
+# ============================================================
+# Extraction audio
+# ============================================================
+async def extract(query):
+    data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
+    if 'entries' in data:
+        data = data['entries'][0]
+    return {
+        'title': data.get('title', 'Inconnu'),
+        'url': data.get('url'),
+        'webpage_url': data.get('webpage_url', ''),
+        'thumbnail': data.get('thumbnail', ''),
+        'duration': data.get('duration', 0),
+        'uploader': data.get('uploader', 'Inconnu'),
+    }
+
+def fmt_dur(s):
+    if not s:
+        return "🔴 Live"
+    return str(datetime.timedelta(seconds=int(s)))
+
+# ============================================================
+# Lecture enchainee
+# ============================================================
+def play_next(guild):
+    q = get_queue(guild.id)
+    vc = guild.voice_client
+    if not vc or not vc.is_connected():
+        return
+    if not q:
+        now_playing[guild.id] = None
+        asyncio.run_coroutine_threadsafe(auto_leave(guild), bot.loop)
+        return
+    song = q.popleft()
+    now_playing[guild.id] = song
+    src = discord.PCMVolumeTransformer(
+        discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
+        volume=get_vol(guild.id)
     )
-    try:
-        with urllib.request.urlopen(req) as res:
-            res_data = json.loads(res.read().decode("utf-8"))
-            if "response" in res_data:
-                return res_data["response"]
-    except Exception as e:
-        print(f"Erreur Worker : {e}", flush=True)
-    return "Desole, une erreur est survenue."
+    vc.play(src, after=lambda e: play_next(guild))
+    print(f"[PLAY] {song['title']}", flush=True)
+
+async def auto_leave(guild, delay=180):
+    await asyncio.sleep(delay)
+    vc = guild.voice_client
+    if vc and vc.is_connected() and not vc.is_playing():
+        await vc.disconnect()
+        print(f"[AUTO] Deconnexion apres inactivite", flush=True)
 
 # ============================================================
-# Bot pret
+# Embeds
+# ============================================================
+def embed_playing(song, who):
+    e = discord.Embed(
+        title="🎵 En cours de lecture",
+        description=f"**[{song['title']}]({song['webpage_url']})**",
+        color=0x5865F2
+    )
+    if song['thumbnail']:
+        e.set_thumbnail(url=song['thumbnail'])
+    e.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+    e.add_field(name="🎤 Artiste", value=song['uploader'], inline=True)
+    e.add_field(name="👤 Par", value=who.mention, inline=True)
+    return e
+
+def embed_queued(song, pos, who):
+    e = discord.Embed(
+        title="📋 Ajouté à la file",
+        description=f"**[{song['title']}]({song['webpage_url']})**",
+        color=0x57F287
+    )
+    if song['thumbnail']:
+        e.set_thumbnail(url=song['thumbnail'])
+    e.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+    e.add_field(name="📍 Position", value=f"#{pos}", inline=True)
+    e.add_field(name="👤 Par", value=who.mention, inline=True)
+    return e
+
+def embed_err(msg):
+    return discord.Embed(title="❌ Erreur", description=msg, color=0xED4245)
+
+# ============================================================
+# Evenements
 # ============================================================
 @bot.event
 async def on_ready():
-    global voice_client
-    print(f"Bot connecte : {bot.user}", flush=True)
-    print("En attente...", flush=True)
+    print(f"[OK] {bot.user} connecte — {len(bot.guilds)} serveur(s)", flush=True)
 
-    await asyncio.sleep(3)
-
-    # Rejoindre le vocal si quelqu'un est deja present
-    target_channel_id = 1361031443177799751
-    channel = bot.get_channel(target_channel_id)
-    if channel and isinstance(channel, discord.VoiceChannel):
-        humans = [m for m in channel.members if not m.bot]
-        if len(humans) > 0 and (voice_client is None or not voice_client.is_connected()):
-            try:
-                print(f"Demarrage : {len(humans)} membre(s). Connexion au vocal...", flush=True)
-                voice_client = await channel.connect()
-            except Exception as e:
-                print(f"Erreur connexion demarrage : {e}", flush=True)
-
-# ============================================================
-# Connexion/deconnexion automatique du vocal
-# ============================================================
 @bot.event
 async def on_voice_state_update(member, before, after):
-    global voice_client
-    target_channel_id = 1361031443177799751
-
-    # Un humain rejoint le salon vocal cible
-    if after.channel and after.channel.id == target_channel_id:
-        if member.bot:
-            return
-        if voice_client is None or not voice_client.is_connected():
-            try:
-                print(f"{member.name} a rejoint le vocal. Connexion...", flush=True)
-                voice_client = await after.channel.connect()
-            except Exception as e:
-                print(f"Erreur connexion vocale : {e}", flush=True)
-
-    # Un humain quitte le salon vocal cible
-    if before.channel and before.channel.id == target_channel_id:
-        if voice_client and voice_client.is_connected():
-            humans_left = [m for m in before.channel.members if not m.bot]
-            if len(humans_left) == 0:
-                print("Plus personne dans le vocal. Deconnexion...", flush=True)
-                await voice_client.disconnect()
-                voice_client = None
+    if member.bot:
+        return
+    if before.channel:
+        vc = before.channel.guild.voice_client
+        if vc and vc.channel == before.channel:
+            if all(m.bot for m in before.channel.members):
+                get_queue(before.channel.guild.id).clear()
+                now_playing[before.channel.guild.id] = None
+                if vc.is_playing():
+                    vc.stop()
+                await vc.disconnect()
+                print("[AUTO] Plus personne — deconnexion", flush=True)
 
 # ============================================================
-# Detection du mot "big model" dans les messages texte
+# Commandes Slash
 # ============================================================
-@bot.event
-async def on_message(message):
-    global voice_client
+@bot.slash_command(name="play", description="🎵 Joue une musique (lien ou recherche)")
+async def cmd_play(
+    ctx,
+    query: discord.Option(str, description="Lien YouTube/SoundCloud ou nom de la chanson")
+):
+    if not ctx.author.voice:
+        return await ctx.respond(
+            embed=embed_err("Rejoins un salon vocal d'abord !"), ephemeral=True
+        )
 
-    # Ignorer les messages du bot lui-meme
-    if message.author.bot:
-        return
+    ch = ctx.author.voice.channel
 
-    text = message.content.lower()
+    if ctx.voice_client is None:
+        await ch.connect()
+    elif ctx.voice_client.channel != ch:
+        await ctx.voice_client.move_to(ch)
 
-    # Chercher le declencheur "big model"
-    trigger_phrases = ["big model", "bigmodel", "big-model", "big modelle"]
-    found_trigger = None
-    for phrase in trigger_phrases:
-        if phrase in text:
-            found_trigger = phrase
-            break
+    await ctx.defer()
 
-    if not found_trigger:
-        # Laisser les autres commandes fonctionner
-        await bot.process_commands(message)
-        return
+    try:
+        song = await extract(query)
+    except Exception as e:
+        return await ctx.followup.send(
+            embed=embed_err(f"Impossible de charger cette musique.\n`{e}`")
+        )
 
-    # Extraire la question apres le mot declencheur
-    parts = text.split(found_trigger, 1)
-    question = parts[1].strip() if len(parts) > 1 else ""
-    if not question:
-        question = "salut"
+    gid = ctx.guild.id
+    q = get_queue(gid)
 
-    user_id = message.author.id
-    username = message.author.name
-
-    print(f"[{username}] big model -> '{question}'", flush=True)
-
-    # Indicateur de frappe pour montrer que le bot reflechit
-    async with message.channel.typing():
-        # Appeler l'IA via Cloudflare
-        ai_response = await asyncio.to_thread(query_cloudflare, user_id, username, question)
-
-    print(f"Reponse IA : {ai_response}", flush=True)
-
-    # Repondre par ecrit dans le chat
-    await message.reply(f"🤖 {ai_response}")
-
-    # Parler la reponse dans le vocal si le bot est connecte
-    if voice_client and voice_client.is_connected():
-        try:
-            # Generer l'audio TTS
-            tts = gTTS(text=ai_response, lang='fr')
-            tts_file = f"response_{user_id}.mp3"
-            tts.save(tts_file)
-
-            # Jouer l'audio dans le vocal
-            voice_client.play(discord.FFmpegPCMAudio(tts_file))
-
-            # Attendre que l'audio soit termine
-            while voice_client.is_playing():
-                await asyncio.sleep(0.5)
-
-            # Nettoyer le fichier temporaire
-            try:
-                os.remove(tts_file)
-            except:
-                pass
-
-            print("Audio joue avec succes dans le vocal.", flush=True)
-        except Exception as e:
-            print(f"Erreur lecture audio : {e}", flush=True)
+    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+        q.append(song)
+        await ctx.followup.send(embed=embed_queued(song, len(q), ctx.author))
     else:
-        print("Bot pas connecte au vocal, reponse texte uniquement.", flush=True)
+        now_playing[gid] = song
+        src = discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
+            volume=get_vol(gid)
+        )
+        ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
+        await ctx.followup.send(embed=embed_playing(song, ctx.author))
 
-    await bot.process_commands(message)
 
-# Lancer le bot
+@bot.slash_command(name="pause", description="⏸️ Met la musique en pause")
+async def cmd_pause(ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.pause()
+        await ctx.respond(
+            embed=discord.Embed(title="⏸️ En pause", color=0xFEE75C)
+        )
+    else:
+        await ctx.respond(
+            embed=embed_err("Rien ne joue actuellement."), ephemeral=True
+        )
+
+
+@bot.slash_command(name="resume", description="▶️ Reprend la lecture")
+async def cmd_resume(ctx):
+    if ctx.voice_client and ctx.voice_client.is_paused():
+        ctx.voice_client.resume()
+        await ctx.respond(
+            embed=discord.Embed(title="▶️ Reprise", color=0x57F287)
+        )
+    else:
+        await ctx.respond(
+            embed=embed_err("La musique n'est pas en pause."), ephemeral=True
+        )
+
+
+@bot.slash_command(name="skip", description="⏭️ Passe à la chanson suivante")
+async def cmd_skip(ctx):
+    if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+        ctx.voice_client.stop()
+        await ctx.respond(
+            embed=discord.Embed(title="⏭️ Chanson passée", color=0x5865F2)
+        )
+    else:
+        await ctx.respond(embed=embed_err("Rien à passer."), ephemeral=True)
+
+
+@bot.slash_command(name="stop", description="🛑 Arrête tout et déconnecte le bot")
+async def cmd_stop(ctx):
+    if not ctx.voice_client:
+        return await ctx.respond(
+            embed=embed_err("Le bot n'est pas connecté."), ephemeral=True
+        )
+    get_queue(ctx.guild.id).clear()
+    now_playing[ctx.guild.id] = None
+    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+        ctx.voice_client.stop()
+    await ctx.voice_client.disconnect()
+    await ctx.respond(
+        embed=discord.Embed(
+            title="🛑 Arrêté",
+            description="À bientôt ! 👋",
+            color=0xED4245
+        )
+    )
+
+
+@bot.slash_command(name="queue", description="📋 Affiche la file d'attente")
+async def cmd_queue(ctx):
+    gid = ctx.guild.id
+    q = get_queue(gid)
+    cur = now_playing.get(gid)
+
+    if not cur and not q:
+        return await ctx.respond(
+            embed=embed_err("File d'attente vide."), ephemeral=True
+        )
+
+    e = discord.Embed(title="📋 File d'attente", color=0x5865F2)
+
+    if cur:
+        e.add_field(
+            name="🎵 En cours",
+            value=f"**{cur['title']}** — {fmt_dur(cur['duration'])}",
+            inline=False
+        )
+
+    if q:
+        lines = []
+        for i, s in enumerate(list(q)[:10], 1):
+            lines.append(f"`{i}.` **{s['title']}** — {fmt_dur(s['duration'])}")
+        if len(q) > 10:
+            lines.append(f"... et {len(q) - 10} autre(s)")
+        e.add_field(name="⏳ À suivre", value="\n".join(lines), inline=False)
+
+    e.set_footer(text=f"{len(q)} chanson(s) en attente")
+    await ctx.respond(embed=e)
+
+
+@bot.slash_command(name="nowplaying", description="🎵 Affiche la musique en cours")
+async def cmd_np(ctx):
+    cur = now_playing.get(ctx.guild.id)
+    if not cur:
+        return await ctx.respond(
+            embed=embed_err("Rien ne joue."), ephemeral=True
+        )
+    await ctx.respond(embed=embed_playing(cur, ctx.author))
+
+
+@bot.slash_command(name="volume", description="🔊 Règle le volume (0-100)")
+async def cmd_vol(
+    ctx,
+    level: discord.Option(
+        int, description="Niveau de volume (0-100)", min_value=0, max_value=100
+    )
+):
+    if not ctx.voice_client:
+        return await ctx.respond(
+            embed=embed_err("Bot non connecté."), ephemeral=True
+        )
+
+    v = level / 100
+    volumes[ctx.guild.id] = v
+
+    if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
+        ctx.voice_client.source.volume = v
+
+    icon = "🔇" if level == 0 else "🔈" if level < 33 else "🔉" if level < 66 else "🔊"
+    await ctx.respond(
+        embed=discord.Embed(title=f"{icon} Volume : {level}%", color=0x5865F2)
+    )
+
+
+# ============================================================
+# Lancement
+# ============================================================
 bot.run(TOKEN)
