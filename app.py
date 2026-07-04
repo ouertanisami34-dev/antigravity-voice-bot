@@ -96,17 +96,21 @@ def fmt_dur(s):
     return str(datetime.timedelta(seconds=int(s)))
 
 # ============================================================
-# Lecture enchainee
+# Lecture enchainee & Deconnexion immediate
 # ============================================================
 def play_next(guild):
     q = get_queue(guild.id)
     vc = guild.voice_client
     if not vc or not vc.is_connected():
         return
+    
+    # S'il n'y a plus de musique dans la file : deconnexion immediate
     if not q:
         now_playing[guild.id] = None
-        asyncio.run_coroutine_threadsafe(auto_leave(guild), bot.loop)
+        asyncio.run_coroutine_threadsafe(vc.disconnect(), bot.loop)
+        print(f"[PLAY] Plus de musiques — deconnexion immediate", flush=True)
         return
+        
     song = q.popleft()
     now_playing[guild.id] = song
     src = discord.PCMVolumeTransformer(
@@ -115,13 +119,6 @@ def play_next(guild):
     )
     vc.play(src, after=lambda e: play_next(guild))
     print(f"[PLAY] {song['title']}", flush=True)
-
-async def auto_leave(guild, delay=180):
-    await asyncio.sleep(delay)
-    vc = guild.voice_client
-    if vc and vc.is_connected() and not vc.is_playing():
-        await vc.disconnect()
-        print(f"[AUTO] Deconnexion apres inactivite", flush=True)
 
 # ============================================================
 # Embeds
@@ -166,6 +163,7 @@ async def on_ready():
 async def on_voice_state_update(member, before, after):
     if member.bot:
         return
+    # Si le dernier utilisateur humain quitte le salon du bot
     if before.channel:
         vc = before.channel.guild.voice_client
         if vc and vc.channel == before.channel:
@@ -175,7 +173,7 @@ async def on_voice_state_update(member, before, after):
                 if vc.is_playing():
                     vc.stop()
                 await vc.disconnect()
-                print("[AUTO] Plus personne — deconnexion", flush=True)
+                print("[AUTO] Salon vide — deconnexion", flush=True)
 
 # ============================================================
 # Commandes Slash
@@ -185,19 +183,24 @@ async def cmd_play(
     ctx,
     query: discord.Option(str, description="Lien YouTube/SoundCloud ou nom de la chanson")
 ):
+    await ctx.defer()
+
     if not ctx.author.voice:
-        return await ctx.respond(
-            embed=embed_err("Rejoins un salon vocal d'abord !"), ephemeral=True
+        return await ctx.followup.send(
+            embed=embed_err("Rejoins un salon vocal d'abord !")
         )
 
     ch = ctx.author.voice.channel
 
-    if ctx.voice_client is None:
-        await ch.connect()
-    elif ctx.voice_client.channel != ch:
-        await ctx.voice_client.move_to(ch)
-
-    await ctx.defer()
+    try:
+        if ctx.voice_client is None:
+            await ch.connect()
+        elif ctx.voice_client.channel != ch:
+            await ctx.voice_client.move_to(ch)
+    except Exception as e:
+        return await ctx.followup.send(
+            embed=embed_err(f"Erreur de connexion au vocal : {e}")
+        )
 
     try:
         song = await extract(query)
@@ -344,8 +347,4 @@ async def cmd_vol(
         embed=discord.Embed(title=f"{icon} Volume : {level}%", color=0x5865F2)
     )
 
-
-# ============================================================
-# Lancement
-# ============================================================
 bot.run(TOKEN)
