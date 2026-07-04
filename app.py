@@ -46,10 +46,10 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
-# Configuration YTDL & FFmpeg
+# Configuration YTDL (Correction anti-blocage) & FFmpeg
 # ============================================================
 YTDL_OPTS = {
-    'format': 'bestaudio[acodec=opus]/bestaudio/best',
+    'format': 'bestaudio/best',
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
@@ -57,6 +57,14 @@ YTDL_OPTS = {
     'source_address': '0.0.0.0',
     'nocheckcertificate': True,
     'geo_bypass': True,
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['ios', 'mweb'],
+        }
+    },
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    },
 }
 
 FFMPEG_OPTS = {
@@ -144,7 +152,6 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-    # Affiche absolument tous les messages recus dans la console Render
     print(f"[MESSAGE REÇU] De '{message.author.name}' dans #{message.channel.name} : '{message.content}'", flush=True)
     await bot.process_commands(message)
 
