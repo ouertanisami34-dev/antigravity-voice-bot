@@ -10,7 +10,7 @@ import json
 import threading
 import gradio as gr
 
-# Charger la configuration depuis les variables d'environnement (Koyeb)
+# Charger la configuration depuis les variables d'environnement (Koyeb/Render)
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 CLOUDFLARE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
 
@@ -163,10 +163,31 @@ async def dummy_callback(sink, *args):
 
 @bot.event
 async def on_ready():
+    global recording_active, voice_client
     print(f"Bot de voix connecté sous le pseudo : {bot.user}")
     print("Prêt pour la connexion vocale automatique dans le salon '🔊 Vocal Membres'")
 
-# Détection de présence pour connexion/déconnexion automatique
+    # Attendre 3 secondes pour s'assurer que le cache Discord est complètement chargé
+    await asyncio.sleep(3)
+    
+    # Vérifier s'il y a déjà des membres dans le salon vocal au démarrage
+    target_channel_id = 1361031443177799751
+    channel = bot.get_channel(target_channel_id)
+    if channel and isinstance(channel, discord.VoiceChannel):
+        humans = [m for m in channel.members if not m.bot]
+        if len(humans) > 0:
+            # Vérifier si le bot n'est pas déjà connecté
+            if voice_client is None or not voice_client.is_connected():
+                try:
+                    print(f"Détection au démarrage : {len(humans)} membre(s) présent(s) dans le salon vocal. Connexion automatique...")
+                    vc = await channel.connect()
+                    voice_client = vc
+                    recording_active = True
+                    bot.loop.create_task(recording_loop(vc, channel))
+                except Exception as e:
+                    print(f"Erreur de connexion automatique au démarrage : {e}")
+
+# Détection de présence pour connexion/déconnexion en cours de route
 @bot.event
 async def on_voice_state_update(member, before, after):
     global recording_active, voice_client
@@ -197,7 +218,7 @@ async def on_voice_state_update(member, before, after):
                 await voice_client.disconnect()
                 voice_client = None
 
-# Interface Gradio minimale pour satisfaire le serveur web Koyeb
+# Interface Gradio minimale pour satisfaire le serveur web Koyeb/Render
 def make_gradio_demo():
     with gr.Blocks() as demo:
         gr.Markdown("# 🎙️ Antigravity - Bot Vocal Discord")
@@ -214,7 +235,6 @@ if __name__ == "__main__":
     # Lancer Discord dans un thread séparé
     threading.Thread(target=run_discord, daemon=True).start()
     
-    # Lancer Gradio (qui écoute sur le port 8000 pour Koyeb)
+    # Lancer Gradio (qui écoute sur le port 8000 pour Koyeb/Render)
     demo = make_gradio_demo()
-    # Koyeb expose par défaut le port 8000
     demo.launch(server_name="0.0.0.0", server_port=8000)
