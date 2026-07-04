@@ -46,7 +46,7 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
-# Configuration YTDL (Correction anti-blocage) & FFmpeg
+# Configuration YTDL & FFmpeg
 # ============================================================
 YTDL_OPTS = {
     'format': 'bestaudio/best',
@@ -88,11 +88,26 @@ def get_vol(gid):
 # Fonctions utilitaires
 # ============================================================
 async def extract_audio(query):
-    print(f"[YTDL] Extraction de la recherche : '{query}'", flush=True)
+    print(f"[YTDL] Extraction : '{query}'", flush=True)
     try:
-        data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
+        is_url = query.startswith(('http://', 'https://'))
+        
+        if is_url:
+            # Lien direct (YouTube, SoundCloud, etc.)
+            search = query
+        else:
+            # Recherche par nom : SoundCloud (jamais bloque sur Render)
+            search = f"scsearch:{query}"
+        
+        data = await asyncio.to_thread(lambda: ytdl.extract_info(search, download=False))
+        
         if 'entries' in data:
+            if not data['entries']:
+                raise Exception("Aucun resultat trouve pour cette recherche.")
             data = data['entries'][0]
+        
+        if not data.get('url'):
+            raise Exception("Pas d'URL audio trouvee.")
         
         info = {
             'title': data.get('title', 'Inconnu'),
@@ -105,7 +120,7 @@ async def extract_audio(query):
         print(f"[YTDL] Extraction reussie : {info['title']}", flush=True)
         return info
     except Exception as e:
-        print(f"[YTDL ERREUR] Impossible d'extraire l'audio : {e}", flush=True)
+        print(f"[YTDL ERREUR] {e}", flush=True)
         traceback.print_exc()
         raise e
 
