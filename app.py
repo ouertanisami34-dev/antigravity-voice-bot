@@ -9,14 +9,9 @@ import datetime
 import traceback
 import threading
 import urllib.request
-import urllib.parse
 import json
 import re
-import ssl
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
-# Desactivation globale de la verification SSL pour eviter les blocages de certificats sur Render
-ssl_context = ssl._create_unverified_context()
 
 # ============================================================
 # Serveur web minimal pour Render (Port 10000)
@@ -48,6 +43,10 @@ ZHIPU_API_KEY = "d67596b18ee34cf0b4bdc4b67d2d6cca.3GvLAH1h06OzPXiR"
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 MEMORY_CHANNEL_ID = 1523012733975658637
 
+# Ponts Cloudflare
+CLOUDFLARE_VOICE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
+CLOUDFLARE_MUSIC_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/music"
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
@@ -56,7 +55,7 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
-# Configuration YTDL & FFmpeg (Fallback uniquement)
+# Configuration YTDL & FFmpeg (Fallback SoundCloud, etc.)
 # ============================================================
 YTDL_OPTS = {
     'format': 'bestaudio/best',
@@ -84,163 +83,61 @@ def get_queue(gid):
 def get_vol(gid):
     return volumes.get(gid, 0.5)
 
-# ============================================================
-# Listes de serveurs Proxy (Piped & Invidious)
-# ============================================================
-PIPED_INSTANCES = [
-    "https://pipedapi.adminforge.de",
-    "https://api.piped.yt",
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.us.to",
-    "https://piped-api.lunar.icu",
-    "https://piped-api.hostux.net"
-]
-
-INVIDIOUS_INSTANCES = [
-    "https://yewtu.be",
-    "https://invidious.projectsegfau.lt",
-    "https://invidious.flokinet.to",
-    "https://invidio.xamh.de",
-    "https://invidious.privacydev.net"
-]
-
 def get_yt_video_id(url):
     pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/)|youtu\.be/)([^?&\s]+)'
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
 # ============================================================
-# Recherche hybride Proxy (YouTube Search)
-# ============================================================
-async def search_video(query):
-    encoded = urllib.parse.quote(query)
-    
-    # 1. Tenter la recherche via Piped API
-    print(f"[RECHERCHE] Tentative Piped pour : '{query}'", flush=True)
-    for instance in PIPED_INSTANCES:
-        try:
-            url = f"{instance}/search?q={encoded}&filter=music_songs"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = await asyncio.to_thread(
-                lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
-            )
-            items = json.loads(data).get("items", [])
-            if items:
-                v_id = get_yt_video_id(f"https://www.youtube.com{items[0].get('url', '')}")
-                if v_id:
-                    print(f"[RECHERCHE OK] Trouve via Piped ({instance}) : {v_id}", flush=True)
-                    return v_id
-        except Exception as e:
-            print(f"[RECHERCHE FAIL] Piped ({instance}) : {e}", flush=True)
-            continue
-
-    # 2. Tenter la recherche via Invidious API
-    print(f"[RECHERCHE] Tentative Invidious pour : '{query}'", flush=True)
-    for instance in INVIDIOUS_INSTANCES:
-        try:
-            url = f"{instance}/api/v1/search?q={encoded}&type=video"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = await asyncio.to_thread(
-                lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
-            )
-            results = json.loads(data)
-            if results and isinstance(results, list):
-                v_id = results[0].get("videoId")
-                if v_id:
-                    print(f"[RECHERCHE OK] Trouve via Invidious ({instance}) : {v_id}", flush=True)
-                    return v_id
-        except Exception as e:
-            print(f"[RECHERCHE FAIL] Invidious ({instance}) : {e}", flush=True)
-            continue
-            
-    return None
-
-# ============================================================
-# Extraction Audio via Proxys
+# Extraction Audio via Cloudflare Worker Proxy
 # ============================================================
 async def extract_audio(query):
-    print(f"[EXTRACTION] Cible : '{query}'", flush=True)
+    print(f"[EXTRACTION] Query : '{query}'", flush=True)
     try:
-        # Recuperer le Video ID
         video_id = get_yt_video_id(query)
-        if not video_id:
-            video_id = await search_video(query)
         
-        # Si ce n'est pas du YouTube (SoundCloud, etc.), fallback standard
-        if not video_id:
-            if query.startswith(('http://', 'https://')):
-                print(f"[YTDL FALLBACK] Extraction standard yt-dlp pour : {query}", flush=True)
-                data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
-                if 'entries' in data:
-                    data = data['entries'][0]
-                return {
-                    'title': data.get('title', 'Inconnu'),
-                    'url': data.get('url'),
-                    'webpage_url': data.get('webpage_url', ''),
-                    'thumbnail': data.get('thumbnail', ''),
-                    'duration': data.get('duration', 0),
-                    'uploader': data.get('uploader', 'Inconnu'),
-                }
-            raise Exception("Aucun resultat trouve.")
+        # Si ce n'est pas du YouTube (ex: SoundCloud), extraction standard sur Render
+        if not video_id and query.startswith(('http://', 'https://')):
+            print(f"[YTDL FALLBACK] Extraction standard pour : {query}", flush=True)
+            data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
+            if 'entries' in data:
+                data = data['entries'][0]
+            return {
+                'title': data.get('title', 'Inconnu'),
+                'url': data.get('url'),
+                'webpage_url': data.get('webpage_url', ''),
+                'thumbnail': data.get('thumbnail', ''),
+                'duration': data.get('duration', 0),
+                'uploader': data.get('uploader', 'Inconnu'),
+            }
 
-        # 1. Recuperer le flux audio via Piped API
-        print(f"[FLUX] Tentative Piped pour video: {video_id}", flush=True)
-        for instance in PIPED_INSTANCES:
-            try:
-                url = f"{instance}/streams/{video_id}"
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                data = await asyncio.to_thread(
-                    lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
-                )
-                res_json = json.loads(data)
-                audio_streams = res_json.get("audioStreams", [])
-                if audio_streams:
-                    best_stream = max(audio_streams, key=lambda s: s.get("bitrate", 0))
-                    info = {
-                        'title': res_json.get('title', 'Inconnu'),
-                        'url': best_stream.get('url'),
-                        'webpage_url': f"https://www.youtube.com/watch?v={video_id}",
-                        'thumbnail': res_json.get('thumbnailUrl', ''),
-                        'duration': res_json.get('duration', 0),
-                        'uploader': res_json.get('uploader', 'Inconnu'),
-                    }
-                    print(f"[FLUX OK] Piped ({instance}) : {info['title']}", flush=True)
-                    return info
-            except Exception as e:
-                print(f"[FLUX FAIL] Piped ({instance}) : {e}", flush=True)
-                continue
-
-        # 2. Recuperer le flux audio via Invidious API
-        print(f"[FLUX] Tentative Invidious pour video: {video_id}", flush=True)
-        for instance in INVIDIOUS_INSTANCES:
-            try:
-                url = f"{instance}/api/v1/videos/{video_id}"
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                data = await asyncio.to_thread(
-                    lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
-                )
-                res_json = json.loads(data)
-                adaptive = res_json.get("adaptiveFormats", [])
-                audio_streams = [f for f in adaptive if f.get("type", "").startswith("audio/")]
-                if audio_streams:
-                    best_audio = audio_streams[0]
-                    info = {
-                        'title': res_json.get('title', 'Inconnu'),
-                        'url': best_audio.get('url'),
-                        'webpage_url': f"https://www.youtube.com/watch?v={video_id}",
-                        'thumbnail': res_json.get('videoThumbnails', [{}])[0].get('url', ''),
-                        'duration': res_json.get('lengthSeconds', 0),
-                        'uploader': res_json.get('author', 'Inconnu'),
-                    }
-                    print(f"[FLUX OK] Invidious ({instance}) : {info['title']}", flush=True)
-                    return info
-            except Exception as e:
-                print(f"[FLUX FAIL] Invidious ({instance}) : {e}", flush=True)
-                continue
-
-        raise Exception("Tous les serveurs de flux audio (Piped/Invidious) ont echoue.")
+        # Sinon, on utilise le pont Cloudflare (Piped/Invidious bypass)
+        print(f"[CLOUDFLARE PROXY] Appel du pont /music pour YouTube", flush=True)
+        payload = {}
+        if video_id:
+            payload["video_id"] = video_id
+        else:
+            payload["query"] = query
+            
+        req = urllib.request.Request(
+            CLOUDFLARE_MUSIC_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+            method="POST"
+        )
+        
+        response = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
+        )
+        res_data = json.loads(response)
+        
+        if "error" in res_data:
+            raise Exception(res_data["error"])
+            
+        return res_data
+        
     except Exception as e:
-        print(f"[EXTRACTION ERREUR GLOBAL] {e}", flush=True)
+        print(f"[EXTRACTION ERREUR] {e}", flush=True)
         raise e
 
 def fmt_dur(s):
@@ -346,7 +243,7 @@ async def call_ai(user_id, username, question, memory_obj):
     )
 
     response = await asyncio.to_thread(
-        lambda: urllib.request.urlopen(req, timeout=15, context=ssl_context).read().decode("utf-8")
+        lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
     )
     data = json.loads(response)
 
