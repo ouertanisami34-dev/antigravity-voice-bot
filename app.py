@@ -269,6 +269,24 @@ async def call_ai(user_id, username, question, memory_obj):
         if new_fact not in memory_obj.get("facts", []):
             memory_obj.setdefault("facts", []).append(new_fact)
 
+    # Récupérer les activités et jeux en temps réel de tous les membres
+    active_activities = []
+    for guild in bot.guilds:
+        for member in guild.members:
+            if member.bot:
+                continue
+            for act in member.activities:
+                if act.type == discord.ActivityType.playing:
+                    active_activities.append(f"{member.name} joue à {act.name}")
+                elif act.type == discord.ActivityType.listening and act.name == "Spotify":
+                    try:
+                        title = getattr(act, "title", None)
+                        artist = getattr(act, "artist", None)
+                        if title and artist:
+                            active_activities.append(f"{member.name} écoute Spotify : {title} (par {artist})")
+                    except Exception:
+                        pass
+
     system_prompt = (
         "Tu es mini-NGR, le petit bot mascotte du serveur Discord THE NGR. "
         "Tu parles comme un pote, de manière décontractée, drôle et directe. "
@@ -288,9 +306,17 @@ async def call_ai(user_id, username, question, memory_obj):
     )
     system_prompt += f"\nTu parles avec {username} (ID: {user_id})."
     if memory_obj.get("facts"):
-        system_prompt += "\nCe que tu sais sur cette personne :\n"
+        system_prompt += "\nCe que tu sais sur cette personne (ses goûts en général) :\n"
         for fact in memory_obj["facts"]:
             system_prompt += f"- {fact}\n"
+
+    # Ajouter l'activité EN DIRECT au prompt système
+    if active_activities:
+        system_prompt += "\nVoici l'activité en temps réel (jeux/musique) de TOUS les membres sur le serveur actuellement :\n"
+        for act in active_activities:
+            system_prompt += f"- {act}\n"
+    else:
+        system_prompt += "\nAucun membre ne joue à un jeu ou n'écoute de musique actuellement sur le serveur."
 
     messages = [{"role": "system", "content": system_prompt}]
     history = memory_obj.get("history", [])
