@@ -231,8 +231,12 @@ FF = {
 ytdl_client = yt_dlp.YoutubeDL(YTDL_OPTS)
 
 def yt_id(url):
-    m = re.search(r'(?:youtube\.com/(?:watch\?v=|embed/|v/)|youtu\.be/)([^?&\s]+)', url or '')
+    m = re.search(r'(?:youtube\.com/(?:watch\?v=|embed/|v/|shorts/)|youtu\.be/)([^?&\s]+)', url or '')
     return m.group(1) if m else None
+
+def is_url(query):
+    """Detects if query is a direct URL (YouTube, SoundCloud, etc.)"""
+    return bool(re.match(r'https?://', query.strip()))
 
 def _make_song(d):
     return {'title': d.get('title', '?'), 'url': d.get('url', ''),
@@ -240,11 +244,36 @@ def _make_song(d):
             'duration': d.get('duration', 0), 'uploader': d.get('uploader', '?')}
 
 async def extract(query):
+    """
+    2-step extraction:
+    1. Metadata (title, duration, thumbnail, uploader) via yt-dlp â€” always accurate
+    2. Stream URL via Cloudflare Worker â€” avoids YouTube bot detection
+    Falls back to full yt-dlp stream URL if Worker fails.
+    """
+    query = query.strip()
     vid = yt_id(query)
-    if not vid and query.startswith(('http://', 'https://')):
-        d = await asyncio.to_thread(lambda: ytdl_client.extract_info(query, download=False))
+
+    # â”€â”€ Ã‰tape 1 : MÃ©tadonnÃ©es via yt-dlp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    meta = {}
+    try:
+        if vid:
+            search = f"https://www.youtube.com/watch?v={vid}"
+        elif is_url(query):
+            search = query
+        else:
+            search = f"ytsearch:{query}"
+        d = await asyncio.to_thread(lambda: ytdl_client.extract_info(search, download=False))
         if 'entries' in d: d = d['entries'][0]
-        return _make_song(d)
+        meta = _make_song(d)
+        # RÃ©cupÃ©rer le vid depuis les mÃ©tadonnÃ©es si on ne l'avait pas
+        if not vid:
+            vid = yt_id(meta.get('webpage_url', ''))
+    except Exception as e:
+        print(f"[META ERR] {e}", flush=True)
+        meta = {'title': query, 'url': '', 'webpage_url': '',
+                'thumbnail': '', 'duration': 0, 'uploader': '?'}
+
+    # â”€â”€ Ã‰tape 2 : URL de stream via Worker Cloudflare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         payload = json.dumps({"video_id": vid} if vid else {"query": query}).encode()
         req = urllib.request.Request(CF_MUSIC, data=payload,
@@ -252,15 +281,21 @@ async def extract(query):
         res = json.loads(await asyncio.to_thread(
             lambda: urllib.request.urlopen(req, timeout=15).read().decode()))
         if "error" in res: raise Exception(res["error"])
-        if not res.get("webpage_url") and vid:
-            res["webpage_url"] = f"https://www.youtube.com/watch?v={vid}"
-        return res
+        stream_url = res.get('url')
+        if not stream_url: raise Exception("Pas d'URL de stream dans la reponse Worker")
+        # Combiner : mÃ©tadonnÃ©es yt-dlp + URL stream Worker
+        meta['url'] = stream_url
+        if not meta.get('webpage_url') and vid:
+            meta['webpage_url'] = f"https://www.youtube.com/watch?v={vid}"
+        return meta
     except Exception as e:
-        print(f"[EXTRACT ERR] Cloudflare Worker failed: {e}, falling back to direct yt-dlp", flush=True)
-        d = await asyncio.to_thread(
-            lambda: ytdl_client.extract_info(f"ytsearch:{query}", download=False))
-        if 'entries' in d: d = d['entries'][0]
-        return _make_song(d)
+        print(f"[STREAM ERR] Worker echoue: {e}", flush=True)
+        # Fallback : utiliser l'URL stream de yt-dlp (peut Ãªtre bloquÃ©e parfois)
+        if meta.get('url'):
+            print("[STREAM] Utilisation de l'URL yt-dlp en fallback", flush=True)
+            return meta
+        raise Exception(f"Impossible d'extraire l'audio: {e}")
+
 
 # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # Moteur audio
