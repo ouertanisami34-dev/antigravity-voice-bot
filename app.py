@@ -262,13 +262,23 @@ async def play_next(guild):
 async def run_play(guild, query, requester="?", channel=None):
     vc = guild.voice_client
     if not vc: raise Exception("Bot pas connecte au vocal")
-    song = await extract(query)
-    song['original_query'] = query
-    song['requester'] = requester
     if vc.is_playing() or vc.is_paused():
+        song = {
+            'title': query,
+            'url': '',
+            'webpage_url': '',
+            'thumbnail': '',
+            'duration': 0,
+            'uploader': 'Attente de lecture...',
+            'original_query': query,
+            'requester': requester
+        }
         Q(guild.id).append(song)
         if channel: await channel.send(embed=added_embed(song, len(Q(guild.id))))
         return song
+    song = await extract(query)
+    song['original_query'] = query
+    song['requester'] = requester
     now_playing[guild.id] = song
     src = discord.PCMVolumeTransformer(
         discord.FFmpegPCMAudio(song['url'], **FF), volume=V(guild.id))
@@ -427,6 +437,7 @@ async def cmd_debuglogs(ctx):
         with open("bot.log", "r", encoding="utf-8") as f:
             lines = f.readlines()
         last_lines = "".join(lines[-40:])
+        # Si trop long, couper
         if len(last_lines) > 1900:
             last_lines = last_lines[-1900:]
         await ctx.send(f"📋 **Derniers logs du bot :**\n```\n{last_lines}\n```")
@@ -543,13 +554,13 @@ async def cmd_ask(ctx, *, question: str):
                     if ctx.author.voice:
                         vc = await ctx.author.voice.channel.connect()
                     else:
-                        if mus_ch: await mus_ch.send("❌ Rejoins un vocal pour la musique !")
+                        await ctx.send("❌ Rejoins un vocal pour la musique !")
                         break
                 await run_play(ctx.guild, title.strip(), "Antigravity IA", mus_ch)
                 if i < len(actions) - 1: await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"[AI PLAY ERR] {title}: {e}", flush=True)
-                if mus_ch: await mus_ch.send(f"❌ Erreur pour **{title.strip()}** : {e}")
+                await ctx.send(f"❌ Erreur pour **{title.strip()}** : {e}")
 
 @bot.event
 async def on_ready():
@@ -588,27 +599,26 @@ async def on_message(message):
                     if message.author.voice:
                         vc = await message.author.voice.channel.connect()
                     else:
-                        if mus_ch: await mus_ch.send("❌ Rejoins un vocal pour la musique !")
+                        await message.channel.send("❌ Rejoins un vocal pour la musique !")
                         break
                 await run_play(message.guild, title.strip(), "Antigravity IA", mus_ch)
                 if i < len(actions) - 1: await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"[AI PLAY ERR] {title}: {e}", flush=True)
-                if mus_ch: await mus_ch.send(f"❌ Erreur pour **{title.strip()}** : {e}")
+                await message.channel.send(f"❌ Erreur pour **{title.strip()}** : {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot: return
-    if before.channel and before.channel.guild.voice_client:
-        vc = before.channel.guild.voice_client
-        if vc.channel == before.channel:
-            humans = [m for m in before.channel.members if not m.bot]
-            if not humans:
-                gid = before.channel.guild.id
-                Q(gid).clear(); loops[gid] = False; now_playing[gid] = None
-                vc.stop(); await vc.disconnect()
-                await bot.change_presence(activity=None)
-                print(f"[AUTO-DC] Plus personne dans le vocal", flush=True)
+    vc = member.guild.voice_client
+    if vc and vc.channel:
+        humans = [m for m in vc.channel.members if not m.bot]
+        if not humans:
+            gid = member.guild.id
+            Q(gid).clear(); loops[gid] = False; now_playing[gid] = None
+            vc.stop(); await vc.disconnect()
+            await bot.change_presence(activity=None)
+            print(f"[AUTO-DC] Plus personne dans le vocal", flush=True)
 
 # ═══════════════════════════════════════════════════════════════
 bot.run(TOKEN)
