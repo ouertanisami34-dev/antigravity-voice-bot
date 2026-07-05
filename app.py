@@ -225,7 +225,7 @@ YTDL_OPTS = {
     'prefer_free_formats': True,
 }
 FF = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 3 -reconnect_at_eof 1 -buffer_size 4194304',
     'options': '-vn'
 }
 ytdl_client = yt_dlp.YoutubeDL(YTDL_OPTS)
