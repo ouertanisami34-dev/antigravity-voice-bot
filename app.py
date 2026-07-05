@@ -737,8 +737,8 @@ async def cmd_ask(ctx, *, question: str):
             await ctx.guild.voice_client.disconnect()
         await bot.change_presence(activity=None)
 
-    actions = re.findall(r'\[ACTION:PLAY:([^\]]+)\]', response)
-    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
+    actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
+    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
     if clean: await ctx.send(f"\U0001F916 {clean}")
     
     if actions:
@@ -826,8 +826,8 @@ async def on_message(message):
             await message.guild.voice_client.disconnect()
         await bot.change_presence(activity=None)
 
-    actions = re.findall(r'\[ACTION:PLAY:([^\]]+)\]', response)
-    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
+    actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
+    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
     if clean: await message.channel.send(f"\U0001F47E {clean}")
 
     if actions:
