@@ -346,10 +346,14 @@ async def play(ctx, *, query: str):
 
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
             q.append(song)
-            embed = discord.Embed(title="📋 Ajouté à la file", description=f"**[{song['title']}]({song['webpage_url']})**", color=0x57F287)
+            description = (
+                f"**[{song['title']}]({song['webpage_url']})**\n\n"
+                "ℹ️ *Astuce : tapez `!queue` pour voir les musiques à venir.*"
+            )
+            embed = discord.Embed(title="📋 Ajouté à la file d'attente", description=description, color=0x57F287)
             if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-            embed.add_field(name="⏱️", value=fmt_dur(song['duration']), inline=True)
-            embed.add_field(name="📍", value=f"#{len(q)}", inline=True)
+            embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+            embed.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
             await ctx.send(embed=embed)
         else:
             now_playing[gid] = song
@@ -359,10 +363,18 @@ async def play(ctx, *, query: str):
                     volume=get_vol(gid)
                 )
                 ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
-                embed = discord.Embed(title="🎵 En cours de lecture", description=f"**[{song['title']}]({song['webpage_url']})**", color=0x5865F2)
+                
+                # Description enrichie avec la liste des commandes utilisables en direct
+                desc_play = (
+                    f"**[{song['title']}]({song['webpage_url']})**\n\n"
+                    "**🎛️ Commandes de contrôle :**\n"
+                    "⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
+                )
+                
+                embed = discord.Embed(title="🎵 En cours de lecture", description=desc_play, color=0x5865F2)
                 if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-                embed.add_field(name="⏱️", value=fmt_dur(song['duration']), inline=True)
-                embed.add_field(name="🎤", value=song['uploader'], inline=True)
+                embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+                embed.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
                 await ctx.send(embed=embed)
             except Exception as e:
                 await ctx.send(f"❌ Erreur lecture : `{e}`")
@@ -371,30 +383,30 @@ async def play(ctx, *, query: str):
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸️ Pause.")
+        await ctx.send("⏸️ Musique mise en pause. Tapez `!resume` pour reprendre.")
 
 @bot.command(name="resume")
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        await ctx.send("▶️ Reprise.")
+        await ctx.send("▶️ Reprise de la lecture.")
 
 @bot.command(name="skip", aliases=["s"])
 async def skip(ctx):
     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
         ctx.voice_client.stop()
-        await ctx.send("⏭️ Passée.")
+        await ctx.send("⏭️ Musique passée !")
 
 @bot.command(name="stop")
 async def stop(ctx):
     if not ctx.voice_client:
-        return await ctx.send("❌ Bot non connecté.")
+        return await ctx.send("❌ Le bot n'est pas connecté.")
     get_queue(ctx.guild.id).clear()
     now_playing[ctx.guild.id] = None
     if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
         ctx.voice_client.stop()
     await ctx.voice_client.disconnect()
-    await ctx.send("🛑 Arrêté.")
+    await ctx.send("🛑 Lecture arrêtée et déconnexion.")
 
 @bot.command(name="queue", aliases=["q"])
 async def queue_info(ctx):
@@ -402,7 +414,7 @@ async def queue_info(ctx):
     q = get_queue(gid)
     cur = now_playing.get(gid)
     if not cur and not q:
-        return await ctx.send("📋 File vide.")
+        return await ctx.send("📋 La file d'attente est vide.")
     e = discord.Embed(title="📋 File d'attente", color=0x5865F2)
     if cur:
         e.add_field(name="🎵 En cours", value=f"**{cur['title']}** — {fmt_dur(cur['duration'])}", inline=False)
@@ -415,13 +427,13 @@ async def queue_info(ctx):
 @bot.command(name="volume", aliases=["vol"])
 async def volume(ctx, level: int):
     if not ctx.voice_client:
-        return await ctx.send("❌ Bot non connecté.")
+        return await ctx.send("❌ Le bot n'est pas connecté.")
     if not (0 <= level <= 100):
-        return await ctx.send("❌ Volume entre 0 et 100.")
+        return await ctx.send("❌ Le volume doit être réglé entre 0 et 100.")
     v = level / 100
     volumes[ctx.guild.id] = v
     if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
         ctx.voice_client.source.volume = v
-    await ctx.send(f"🔊 Volume : **{level}%**")
+    await ctx.send(f"🔊 Le volume a été réglé à **{level}%**.")
 
 bot.run(TOKEN)
