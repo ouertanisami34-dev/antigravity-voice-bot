@@ -12,7 +12,11 @@ import urllib.request
 import urllib.parse
 import json
 import re
+import ssl
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Desactivation globale de la verification SSL pour eviter les blocages de certificats sur Render
+ssl_context = ssl._create_unverified_context()
 
 # ============================================================
 # Serveur web minimal pour Render (Port 10000)
@@ -117,14 +121,17 @@ async def search_video(query):
         try:
             url = f"{instance}/search?q={encoded}&filter=music_songs"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+            data = await asyncio.to_thread(
+                lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
+            )
             items = json.loads(data).get("items", [])
             if items:
                 v_id = get_yt_video_id(f"https://www.youtube.com{items[0].get('url', '')}")
                 if v_id:
                     print(f"[RECHERCHE OK] Trouve via Piped ({instance}) : {v_id}", flush=True)
                     return v_id
-        except Exception:
+        except Exception as e:
+            print(f"[RECHERCHE FAIL] Piped ({instance}) : {e}", flush=True)
             continue
 
     # 2. Tenter la recherche via Invidious API
@@ -133,14 +140,17 @@ async def search_video(query):
         try:
             url = f"{instance}/api/v1/search?q={encoded}&type=video"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+            data = await asyncio.to_thread(
+                lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
+            )
             results = json.loads(data)
             if results and isinstance(results, list):
                 v_id = results[0].get("videoId")
                 if v_id:
                     print(f"[RECHERCHE OK] Trouve via Invidious ({instance}) : {v_id}", flush=True)
                     return v_id
-        except Exception:
+        except Exception as e:
+            print(f"[RECHERCHE FAIL] Invidious ({instance}) : {e}", flush=True)
             continue
             
     return None
@@ -179,7 +189,9 @@ async def extract_audio(query):
             try:
                 url = f"{instance}/streams/{video_id}"
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+                data = await asyncio.to_thread(
+                    lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
+                )
                 res_json = json.loads(data)
                 audio_streams = res_json.get("audioStreams", [])
                 if audio_streams:
@@ -194,7 +206,8 @@ async def extract_audio(query):
                     }
                     print(f"[FLUX OK] Piped ({instance}) : {info['title']}", flush=True)
                     return info
-            except Exception:
+            except Exception as e:
+                print(f"[FLUX FAIL] Piped ({instance}) : {e}", flush=True)
                 continue
 
         # 2. Recuperer le flux audio via Invidious API
@@ -203,12 +216,13 @@ async def extract_audio(query):
             try:
                 url = f"{instance}/api/v1/videos/{video_id}"
                 req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+                data = await asyncio.to_thread(
+                    lambda u=req: urllib.request.urlopen(u, timeout=10, context=ssl_context).read().decode("utf-8")
+                )
                 res_json = json.loads(data)
                 adaptive = res_json.get("adaptiveFormats", [])
                 audio_streams = [f for f in adaptive if f.get("type", "").startswith("audio/")]
                 if audio_streams:
-                    # Choisir le flux avec le plus haut bitrate ou le premier
                     best_audio = audio_streams[0]
                     info = {
                         'title': res_json.get('title', 'Inconnu'),
@@ -220,7 +234,8 @@ async def extract_audio(query):
                     }
                     print(f"[FLUX OK] Invidious ({instance}) : {info['title']}", flush=True)
                     return info
-            except Exception:
+            except Exception as e:
+                print(f"[FLUX FAIL] Invidious ({instance}) : {e}", flush=True)
                 continue
 
         raise Exception("Tous les serveurs de flux audio (Piped/Invidious) ont echoue.")
@@ -331,7 +346,7 @@ async def call_ai(user_id, username, question, memory_obj):
     )
 
     response = await asyncio.to_thread(
-        lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
+        lambda: urllib.request.urlopen(req, timeout=15, context=ssl_context).read().decode("utf-8")
     )
     data = json.loads(response)
 
