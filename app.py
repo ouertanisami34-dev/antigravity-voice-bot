@@ -105,7 +105,10 @@ def is_music_request(question):
 # ============================================================
 @bot.check
 async def check_command_channels(ctx):
-    music_commands = {"play", "p", "pause", "resume", "skip", "s", "stop", "queue", "q", "volume", "vol"}
+    music_commands = {
+        "play", "p", "pause", "resume", "skip", "s", "stop", 
+        "queue", "q", "volume", "vol", "clearqueue", "cq", "clean", "empty"
+    }
     
     # Déterminer le salon cible selon la commande
     if ctx.command.name in music_commands:
@@ -212,6 +215,9 @@ async def extract_audio(query):
         if "error" in res_data:
             raise Exception(res_data["error"])
 
+        if not res_data.get("webpage_url") and video_id:
+            res_data["webpage_url"] = f"https://www.youtube.com/watch?v={video_id}"
+
         return res_data
 
     except Exception as e:
@@ -222,6 +228,28 @@ def fmt_dur(s):
     if not s:
         return "🔴 Live"
     return str(datetime.timedelta(seconds=int(s)))
+
+# ============================================================
+# Suivi du temps écoulé de la lecture
+# ============================================================
+def get_elapsed_time(song):
+    if not song or 'start_time' not in song:
+        return 0
+    if 'pause_start' in song:
+        elapsed = (song['pause_start'] - song['start_time']).total_seconds() - song.get('paused_duration', 0)
+    else:
+        elapsed = (datetime.datetime.now() - song['start_time']).total_seconds() - song.get('paused_duration', 0)
+    return max(0, int(elapsed))
+
+def make_progress_bar(elapsed, total):
+    if not total:
+        return "🔴 [▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬] Live"
+    length = 20
+    percent = elapsed / total
+    filled = int(length * percent)
+    filled = max(0, min(length, filled))
+    bar = "▬" * filled + "🔘" + "▬" * (length - filled - 1)
+    return f"▶️ {bar} `[{fmt_dur(elapsed)} / {fmt_dur(total)}]`"
 
 # ============================================================
 # Logique de file d'attente threadsafe asynchrone
@@ -246,10 +274,25 @@ async def play_next_async(guild):
         # Pause d'une demi-seconde pour laisser l'ancien lecteur se fermer proprement
         await asyncio.sleep(0.5)
         
+        # RAFRAÎCHIR le lien de flux juste avant de jouer pour éviter l'expiration du lien Cobalt
+        print(f"[PLAY_NEXT] Rafraichissement du flux pour : '{song['title']}'", flush=True)
+        try:
+            query_to_refresh = song.get('webpage_url') or song.get('original_query') or song['title']
+            fresh_song = await extract_audio(query_to_refresh)
+            stream_url = fresh_song['url']
+        except Exception as refresh_err:
+            print(f"[REFRESH ERREUR] Impossible de rafraichir, utilisation du lien stocke : {refresh_err}", flush=True)
+            stream_url = song['url']
+        
         src = discord.PCMVolumeTransformer(
-            discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
+            discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTS),
             volume=get_vol(guild.id)
         )
+        
+        # Enregistrer le début de la lecture
+        song['start_time'] = datetime.datetime.now()
+        song['paused_duration'] = 0
+        
         vc.play(src, after=lambda e: play_next_threadsafe(guild))
         print(f"[PLAY] {song['title']}", flush=True)
     except Exception as e:
@@ -321,35 +364,34 @@ async def call_ai(user_id, username, question, memory_obj):
         "Tu es mini-NGR, le petit bot mascotte du serveur Discord THE NGR. "
         "Tu parles comme un pote, de manière décontractée, drôle et directe. "
         "Tu as le contrôle sur le lecteur de musique du serveur ! "
-        "Uniquement si l'utilisateur te demande explicitement de contrôler la musique (jouer, passer, couper, etc.), "
-        "ajoute l'une de ces balises à la toute fin de ta réponse (elle sera invisible pour lui) :\n"
+        "Uniquement si l'utilisateur te demande explicitement de contrôler la musique, "
+        "ajoute l'une de ces balises à la toute fin de ta réponse :\n"
         "- [ACTION:PLAY:nom de la musique ou URL] (ajoute à la file d'attente s'il y a déjà du son)\n"
-        "- [ACTION:PLAY_NOW:nom de la musique ou URL] (uniquement si l'utilisateur te demande d'y jouer TOUT DE SUITE, MAINTENANT, ou EN PRIORITÉ, cela coupera la musique actuelle pour lancer celle-ci directement)\n"
-        "- [ACTION:SKIP] (seulement s'il te demande de passer à la suivante)\n"
-        "- [ACTION:PAUSE] (seulement s'il te demande de mettre en pause)\n"
-        "- [ACTION:RESUME] (seulement s'il te demande de reprendre)\n"
-        "- [ACTION:STOP] (seulement s'il te demande d'arrêter ou de quitter)\n\n"
+        "- [ACTION:PLAY_NOW:nom de la musique ou URL] (si on te demande d'y jouer TOUT DE SUITE, MAINTENANT, ou EN PRIORITÉ, coupe la musique en cours pour lancer celle-ci directement)\n"
+        "- [ACTION:SKIP] (si on te demande de passer)\n"
+        "- [ACTION:PAUSE] (si on te demande de mettre en pause)\n"
+        "- [ACTION:RESUME] (si on te demande de reprendre)\n"
+        "- [ACTION:STOP] (si on te demande d'arrêter ou de déconnecter le bot)\n"
+        "- [ACTION:CLEARQUEUE] (si on te demande d'annuler la file d'attente, vider la liste ou nettoyer la suite)\n"
+        "- [ACTION:QUEUE] (si on te demande de montrer la file d'attente, voir la liste ou qu'est-ce qu'il y a après)\n\n"
         "Tu peux enchaîner plusieurs balises de PLAY si l'utilisateur te demande plusieurs musiques d'un coup. "
-        "Exemple pour Jul et PNL : 'Je t'ajoute ça direct ! [ACTION:PLAY:Jul] [ACTION:PLAY:PNL]'\n\n"
+        "Si l'utilisateur te demande une liste de musiques ou de lancer un genre (ex: 'fais une liste de 10 fonk et lance-les 1 par 1'), "
+        "propose la liste en texte ET ajoute absolument toutes les balises [ACTION:PLAY:nom du morceau] correspondantes à la toute fin de ta réponse "
+        "pour que le bot les charge toutes d'un coup en arrière-plan !\n\n"
         "IMPORTANT : Si l'utilisateur te dit bonjour, te parle normalement ou te pose une question générale, "
-        "réponds-lui simplement sans ajouter de balise [ACTION:...] à la fin. Ne mets JAMAIS de balise pour une simple discussion !"
-        "\nExemple de discussion simple : 'Salut frérot ! Ça va ?'\n"
-        "Exemple de commande musique : 'Pas de soucis, je te mets du Jul ! [ACTION:PLAY:Jul Da]'\n"
+        "réponds-lui simplement sans ajouter de balise [ACTION:...] à la fin.\n"
         "Réponds de manière TRÈS concise (1 à 2 phrases max, moins de 50 mots)."
     )
     system_prompt += f"\nTu parles avec {username} (ID: {user_id})."
     if memory_obj.get("facts"):
-        system_prompt += "\nCe que tu sais sur cette personne (ses goûts en général) :\n"
+        system_prompt += "\nCe que tu sais sur cette personne (ses goûts) :\n"
         for fact in memory_obj["facts"]:
             system_prompt += f"- {fact}\n"
 
-    # Ajouter l'activité EN DIRECT au prompt système
     if active_activities:
-        system_prompt += "\nVoici l'activité en temps réel (jeux/musique) de TOUS les membres sur le serveur actuellement :\n"
+        system_prompt += "\nActivité en temps réel des membres connectés actuellement :\n"
         for act in active_activities:
             system_prompt += f"- {act}\n"
-    else:
-        system_prompt += "\nAucun membre ne joue à un jeu ou n'écoute de musique actuellement sur le serveur."
 
     messages = [{"role": "system", "content": system_prompt}]
     history = memory_obj.get("history", [])
@@ -360,7 +402,7 @@ async def call_ai(user_id, username, question, memory_obj):
     payload = json.dumps({
         "model": "glm-4-flash",
         "messages": messages,
-        "max_tokens": 150
+        "max_tokens": 300
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -405,7 +447,6 @@ async def process_hourly_summary():
     )
     
     if not has_activity:
-        print("[HOURLY] Aucune activite durant l'heure passee. Annulation de l'appel API.", flush=True)
         return
 
     # Mettre en forme le résumé
@@ -420,7 +461,6 @@ async def process_hourly_summary():
         lines.append(f"Musique lances par le bot : {', '.join(hourly_events['bot_songs'])}")
 
     summary_text = "\n".join(lines)
-    print(f"[HOURLY] Lancement de la synthese IA pour :\n{summary_text}", flush=True)
 
     # Réinitialisation de la mémoire horaire
     hourly_events = {
@@ -436,8 +476,7 @@ async def process_hourly_summary():
             "Voici la liste des activités que les membres ont faites durant l'heure passée. "
             "Rédige un message en français à la fois drôle, amical et intelligent pour réagir "
             "dans le salon des bots, charrier gentiment les membres (roast amical de gamer) "
-            "et demander des nouvelles. Reste TRÈS court et naturel (max 60 mots). "
-            "Utilise le tutoiement, le langage familier de pote et quelques émojis."
+            "et demander des nouvelles. Reste TRÈS court et naturel (max 60 mots)."
         )
 
         payload = json.dumps({
@@ -475,7 +514,6 @@ async def process_hourly_summary():
 async def hourly_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        # Attendre 1 heure (3600 secondes)
         await asyncio.sleep(3600)
         await process_hourly_summary()
 
@@ -485,7 +523,6 @@ async def hourly_loop():
 @bot.event
 async def on_ready():
     print(f"[OK] {bot.user} connecte — {len(bot.guilds)} serveur(s)", flush=True)
-    # Lancement de la boucle d'activite horaire en arriere-plan
     bot.loop.create_task(hourly_loop())
     
     # Forcer le chunking de tous les serveurs pour charger les presences des membres
@@ -504,7 +541,7 @@ async def on_message(message):
     # Enregistrer l'activite de chat de l'utilisateur dans l'historique de l'heure
     hourly_events["chatters"].add(message.author.name)
     
-    # Si le message est dans #👾-mini-ngr et ne commence pas par !, l'IA repond en direct sans avoir besoin de taper !ask
+    # Si le message est dans #👾-mini-ngr et ne commence pas par !, l'IA repond en direct
     if message.channel.id == MINI_NGR_CHANNEL_ID and not message.content.startswith("!"):
         ctx = await bot.get_context(message)
         await run_ask(ctx, message.content)
@@ -520,10 +557,8 @@ async def on_presence_update(before, after):
         
     # Parcourir les activites en cours de l'utilisateur
     for act in after.activities:
-        # Pister les jeux
         if act.type == discord.ActivityType.playing:
             hourly_events["games"].add(f"{after.name} joue à {act.name}")
-        # Pister Spotify
         elif act.type == discord.ActivityType.listening and act.name == "Spotify":
             try:
                 title = getattr(act, "title", None)
@@ -558,31 +593,45 @@ async def on_voice_state_update(member, before, after):
                 await vc.disconnect()
 
 # ============================================================
-# Fonction de lecture de base (partagée)
+# Fonction d'affichage de la file d'attente (Interface Premium)
 # ============================================================
-async def play_song_immediately(ctx, music_channel, song):
+async def show_queue(ctx):
     gid = ctx.guild.id
-    now_playing[gid] = song
-    try:
-        src = discord.PCMVolumeTransformer(
-            discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
-            volume=get_vol(gid)
-        )
-        ctx.voice_client.play(src, after=lambda e: play_next_threadsafe(ctx.guild))
+    q = get_queue(gid)
+    cur = now_playing.get(gid)
+    
+    music_channel = bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel
 
-        desc_play = (
-            f"**[{song['title']}]({song['webpage_url']})**\n\n"
-            "**🎛️ Commandes :**\n"
-            "⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
+    if not cur and not q:
+        return await music_channel.send("📋 La file d'attente est vide.")
+        
+    e = discord.Embed(title="🎼 FILE D'ATTENTE ACTUELLE", color=0x5865F2)
+    
+    if cur:
+        elapsed = get_elapsed_time(cur)
+        progress = make_progress_bar(elapsed, cur.get('duration', 0))
+        e.add_field(
+            name="🎵 En cours de lecture", 
+            value=f"**[{cur['title']}]({cur['webpage_url']})**\n{progress}\n*Par : {cur['uploader']}*", 
+            inline=False
         )
+        if cur.get('thumbnail'):
+            e.set_thumbnail(url=cur['thumbnail'])
+            
+    if q:
+        lines = []
+        for i, s in enumerate(list(q)[:10], 1):
+            lines.append(f"`{i}.` ⏳ **[{s['title']}]({s['webpage_url']})** `[{fmt_dur(s['duration'])}]`")
+        if len(q) > 10:
+            lines.append(f"\n*... et {len(q) - 10} autre(s) musique(s)*")
+            
+        total_q_duration = sum(int(s.get('duration', 0)) for s in q)
+        e.add_field(name="⏳ À suivre", value="\n".join(lines), inline=False)
+        e.set_footer(text=f"Total : {len(q)} musique(s) en attente • Durée totale : {fmt_dur(total_q_duration)}")
+    else:
+        e.set_footer(text="Aucune musique suivante • La lecture s'arrêtera à la fin de ce morceau.")
 
-        embed = discord.Embed(title="🎵 En cours de lecture", description=desc_play, color=0x5865F2)
-        if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-        embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-        embed.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
-        await music_channel.send(embed=embed)
-    except Exception as e:
-        await music_channel.send(f"❌ Erreur lecture : `{e}`")
+    await music_channel.send(embed=e)
 
 # ============================================================
 # Fonction centrale d'execution de la Musique (Partagee)
@@ -599,13 +648,11 @@ async def run_play(ctx, query, play_now=False):
     except Exception as e:
         return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
 
-    # Déterminer le salon cible pour les embeds musique (toujours #🎵-musique)
-    music_channel = bot.get_channel(MUSIC_CHANNEL_ID)
-    if not music_channel:
-        music_channel = ctx.channel
+    music_channel = bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel
 
     try:
         song = await extract_audio(query)
+        song['original_query'] = query
     except Exception as e:
         return await music_channel.send(f"❌ Impossible de charger : `{e}`")
 
@@ -615,11 +662,10 @@ async def run_play(ctx, query, play_now=False):
     hourly_events["bot_songs"].add(song['title'])
 
     if play_now:
-        # Mode lecture immédiate (coupe le son actuel en le replaçant en tête de liste)
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-            # Insérer la musique tout de suite au début de la queue
+            # Mettre la musique en première position dans la file
             q.appendleft(song)
-            # Arrêter la lecture en cours (déclenchera l'événement play_next_threadsafe)
+            # Stopper l'ancienne (le callback déclenchera automatiquement play_next)
             ctx.voice_client.stop()
             
             embed = discord.Embed(
@@ -632,7 +678,6 @@ async def run_play(ctx, query, play_now=False):
         else:
             await play_song_immediately(ctx, music_channel, song)
     else:
-        # Mode normal (file d'attente)
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
             q.append(song)
             description = (
@@ -679,11 +724,16 @@ async def run_ask(ctx, question):
             for action_type, action_arg in actions:
                 await asyncio.sleep(0.5) # Délai naturel entre actions
                 
+                # Détecter s'il faut jouer immédiatement
+                play_now_intent = False
+                if any(x in question.lower() for x in ["tout de suite", "maintenant", "priorite", "direct", "prioritaire"]):
+                    play_now_intent = True
+                
                 if action_type == "PLAY" and action_arg:
                     if is_music_request(question):
-                        await run_play(ctx, action_arg, play_now=False)
+                        await run_play(ctx, action_arg, play_now=play_now_intent)
                     else:
-                        print(f"[SECURITY] PLAY filtre pour la question hors-sujet musique : '{question}'", flush=True)
+                        print(f"[SECURITY] PLAY filtre pour : '{question}'", flush=True)
                         
                 elif action_type == "PLAY_NOW" and action_arg:
                     if is_music_request(question):
@@ -699,11 +749,18 @@ async def run_ask(ctx, question):
                 elif action_type == "PAUSE":
                     if ctx.voice_client and ctx.voice_client.is_playing():
                         ctx.voice_client.pause()
+                        # Enregistrer le moment de la pause
+                        now_playing[ctx.guild.id]['pause_start'] = datetime.datetime.now()
                         await ctx.send("⏸️ Musique mise en pause par mini-NGR.")
                         
                 elif action_type == "RESUME":
                     if ctx.voice_client and ctx.voice_client.is_paused():
                         ctx.voice_client.resume()
+                        # Calculer le temps passé en pause
+                        song = now_playing[ctx.guild.id]
+                        if 'pause_start' in song:
+                            song['paused_duration'] = song.get('paused_duration', 0) + (datetime.datetime.now() - song['pause_start']).total_seconds()
+                            del song['pause_start']
                         await ctx.send("▶️ Lecture reprise par mini-NGR.")
                         
                 elif action_type == "STOP":
@@ -714,6 +771,15 @@ async def run_ask(ctx, question):
                             ctx.voice_client.stop()
                         await ctx.voice_client.disconnect()
                         await ctx.send("🛑 Lecture arrêtée par mini-NGR.")
+                        
+                elif action_type == "CLEARQUEUE":
+                    gid = ctx.guild.id
+                    get_queue(gid).clear()
+                    music_channel = bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel
+                    await music_channel.send("🧹 La file d'attente a été vidée par mini-NGR !")
+                    
+                elif action_type == "QUEUE":
+                    await show_queue(ctx)
 
         except Exception as e:
             print(f"[ASK ERREUR] {e}", flush=True)
@@ -889,12 +955,19 @@ async def play(ctx, *, query: str):
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
+        if ctx.guild.id in now_playing:
+            now_playing[ctx.guild.id]['pause_start'] = datetime.datetime.now()
         await ctx.send("⏸️ Musique en pause. Tapez `!resume` pour reprendre.")
 
 @bot.command(name="resume")
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
+        if ctx.guild.id in now_playing:
+            song = now_playing[ctx.guild.id]
+            if 'pause_start' in song:
+                song['paused_duration'] = song.get('paused_duration', 0) + (datetime.datetime.now() - song['pause_start']).total_seconds()
+                del song['pause_start']
         await ctx.send("▶️ Reprise de la lecture.")
 
 @bot.command(name="skip", aliases=["s"])
@@ -915,20 +988,17 @@ async def stop(ctx):
     await ctx.send("🛑 Lecture arrêtée et déconnexion.")
 
 @bot.command(name="queue", aliases=["q"])
-async def queue_info(ctx):
+async def queue_cmd(ctx):
+    await show_queue(ctx)
+
+@bot.command(name="clearqueue", aliases=["cq", "clean", "empty"])
+async def clear_queue_cmd(ctx):
     gid = ctx.guild.id
     q = get_queue(gid)
-    cur = now_playing.get(gid)
-    if not cur and not q:
-        return await ctx.send("📋 La file d'attente est vide.")
-    e = discord.Embed(title="📋 File d'attente", color=0x5865F2)
-    if cur:
-        e.add_field(name="🎵 En cours", value=f"**{cur['title']}** — {fmt_dur(cur['duration'])}", inline=False)
-    if q:
-        lines = [f"`{i}.` **{s['title']}** — {fmt_dur(s['duration'])}" for i, s in enumerate(list(q)[:10], 1)]
-        if len(q) > 10: lines.append(f"... et {len(q) - 10} autre(s)")
-        e.add_field(name="⏳ À suivre", value="\n".join(lines), inline=False)
-    await ctx.send(embed=e)
+    if not q:
+        return await ctx.send("❌ La file d'attente est déjà vide.")
+    q.clear()
+    await ctx.send("🧹 La file d'attente a été vidée par mini-NGR !")
 
 @bot.command(name="volume", aliases=["vol"])
 async def volume(ctx, level: int):
