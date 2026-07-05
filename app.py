@@ -185,21 +185,127 @@ async def extract(query):
         d = await asyncio.to_thread(lambda: ytdl_client.extract_info(query, download=False))
         if 'entries' in d: d = d['entries'][0]
         return _make_song(d)
+        
+    yt_url = None
+    title = "?"
+    uploader = "YouTube"
+    duration = 0
+    thumbnail = ""
+    
     try:
         payload = json.dumps({"video_id": vid} if vid else {"query": query}).encode()
         req = urllib.request.Request(CF_MUSIC, data=payload,
             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}, method="POST")
         res = json.loads(await asyncio.to_thread(
             lambda: urllib.request.urlopen(req, timeout=15).read().decode()))
-        if "error" in res: raise Exception(res["error"])
-        if not res.get("webpage_url") and vid:
-            res["webpage_url"] = f"https://www.youtube.com/watch?v={vid}"
-        return res
+        if "error" not in res:
+            yt_url = res.get("webpage_url")
+            title = res.get("title", "?")
+            uploader = res.get("uploader", "YouTube")
+            duration = res.get("duration", 0)
+            thumbnail = res.get("thumbnail", "")
     except Exception:
-        d = await asyncio.to_thread(
-            lambda: ytdl_client.extract_info(f"ytsearch:{query}", download=False))
-        if 'entries' in d: d = d['entries'][0]
-        return _make_song(d)
+        pass
+        
+    if not yt_url:
+        if vid:
+            yt_url = f"https://www.youtube.com/watch?v={vid}"
+        else:
+            try:
+                d = await asyncio.to_thread(lambda: ytdl_client.extract_info(f"ytsearch:{query}", download=False))
+                if 'entries' in d and d['entries']:
+                    entry = d['entries'][0]
+                    vid = entry['id']
+                    yt_url = f"https://www.youtube.com/watch?v={vid}"
+                    title = entry.get('title', '?')
+                    uploader = entry.get('uploader', 'YouTube')
+                    duration = entry.get('duration', 0)
+                    thumbnail = entry.get('thumbnail', "")
+            except Exception as e:
+                raise Exception(f"Recherche impossible : {e}")
+
+    # Récupérer les instances Cobalt de cobalt.directory
+    instances = ["https://api.cobalt.blackcat.sweeux.org/"] # Fallback principal qui fonctionne
+    try:
+        dir_req = urllib.request.Request("https://cobalt.directory/api/working", headers={"User-Agent": "Mozilla/5.0"})
+        dir_res = json.loads(await asyncio.to_thread(
+            lambda: urllib.request.urlopen(dir_req, timeout=5).read().decode()))
+        working = dir_res.get("data", {}).get("youtube", [])
+        if working:
+            # Placer l'instance blackcat en tête de liste si présente
+            working_normalized = [inst if inst.endswith("/") else f"{inst}/" for inst in working]
+            if "https://api.cobalt.blackcat.sweeux.org/" in working_normalized:
+                working_normalized.remove("https://api.cobalt.blackcat.sweeux.org/")
+                working_normalized.insert(0, "https://api.cobalt.blackcat.sweeux.org/")
+            instances = working_normalized
+    except Exception:
+        pass
+
+    # Essai de chaque instance Cobalt
+    for api_url in instances:
+        try:
+            print(f"[EXTRACT] Tentative avec l'instance Cobalt : {api_url}", flush=True)
+            payload = json.dumps({
+                "url": yt_url,
+                "downloadMode": "audio",
+                "audioFormat": "mp3",
+                "audioBitrate": "128"
+            }).encode()
+            
+            cobalt_req = urllib.request.Request(api_url, data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                }, method="POST")
+                
+            cobalt_res = json.loads(await asyncio.to_thread(
+                lambda: urllib.request.urlopen(cobalt_req, timeout=8).read().decode()))
+                
+            stream_url = cobalt_res.get("url")
+            if not stream_url:
+                continue
+
+            # Validation du flux : tentative de lecture du premier octet
+            chk_req = urllib.request.Request(stream_url, headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                def validate_stream():
+                    with urllib.request.urlopen(chk_req, timeout=3) as resp:
+                        # Si le serveur renvoie Content-Length: 0 ou aucun octet
+                        if resp.headers.get("Content-Length") == "0":
+                            return False
+                        b = resp.read(1)
+                        return len(b) > 0
+                
+                is_valid = await asyncio.to_thread(validate_stream)
+                if not is_valid:
+                    print(f"[EXTRACT] Instance {api_url} a renvoyé un flux vide (bloqué par YT).", flush=True)
+                    continue
+            except Exception as e:
+                # Si le serveur n'autorise pas ou a expiré directement
+                print(f"[EXTRACT] Échec de validation du flux pour {api_url}: {e}", flush=True)
+                continue
+
+            # Si validé !
+            print(f"[EXTRACT] Succès avec l'instance {api_url}", flush=True)
+            return {
+                "title": title,
+                "url": stream_url,
+                "webpage_url": yt_url,
+                "thumbnail": thumbnail,
+                "duration": duration,
+                "uploader": uploader
+            }
+        except Exception as e:
+            print(f"[EXTRACT] Échec extraction avec l'instance {api_url}: {e}", flush=True)
+            continue
+
+    # Si tout échoue, fallback yt-dlp direct
+    print("[EXTRACT] Toutes les instances Cobalt ont échoué. Fallback yt-dlp direct.", flush=True)
+    d = await asyncio.to_thread(
+        lambda: ytdl_client.extract_info(f"ytsearch:{query}", download=False))
+    if 'entries' in d: d = d['entries'][0]
+    return _make_song(d)
 
 # ═══════════════════════════════════════════════════════════════
 # Moteur audio
