@@ -190,7 +190,7 @@ intents.message_content = intents.voice_states = intents.guilds = True
 intents.presences = intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-queues, now_playing, volumes, loops, auto_paused = {}, {}, {}, {}, {}
+queues, now_playing, volumes, loops = {}, {}, {}, {}
 def Q(gid): return queues.setdefault(gid, collections.deque())
 def V(gid): return volumes.get(gid, 0.5)
 
@@ -225,6 +225,7 @@ YTDL_OPTS = {
     'prefer_free_formats': True,
 }
 FF = {
+    # Amélioration des paramètres de reconnexion pour éviter les coupures sur Render
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1',
     'options': '-vn'
 }
@@ -244,6 +245,10 @@ def _make_song(d):
             'duration': d.get('duration', 0), 'uploader': d.get('uploader', '?')}
 
 async def fetch_youtube_oembed(vid):
+    """
+    Fetches clean metadata (title, uploader, thumbnail) from YouTube's public oEmbed API.
+    This endpoint is lightweight, fast, and never blocked by bot detection.
+    """
     try:
         url = f"https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D{vid}&format=json"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -260,6 +265,12 @@ async def fetch_youtube_oembed(vid):
         return None
 
 async def extract(query):
+    """
+    2-step extraction:
+    1. Metadata (title, duration, thumbnail, uploader) via yt-dlp/oEmbed — always accurate
+    2. Stream URL via Cloudflare Worker — avoids YouTube bot detection
+    Falls back to full yt-dlp stream URL if Worker fails.
+    """
     query = query.strip()
     vid = yt_id(query)
 
@@ -275,10 +286,12 @@ async def extract(query):
         d = await asyncio.to_thread(lambda: ytdl_client.extract_info(search, download=False))
         if 'entries' in d: d = d['entries'][0]
         meta = _make_song(d)
+        # Récupérer le vid depuis les métadonnées si on ne l'avait pas
         if not vid:
             vid = yt_id(meta.get('webpage_url', ''))
     except Exception as e:
         print(f"[META ERR] {e}", flush=True)
+        # SÉCURITÉ : Récupérer via oEmbed si c'est une vidéo YouTube
         if vid:
             oembed_data = await fetch_youtube_oembed(vid)
             if oembed_data:
@@ -304,10 +317,12 @@ async def extract(query):
         if "error" in res: raise Exception(res["error"])
         stream_url = res.get('url')
         if not stream_url: raise Exception("Pas d'URL de stream dans la reponse Worker")
+        # Combiner : métadonnées yt-dlp + URL stream Worker
         meta['url'] = stream_url
         if not meta.get('webpage_url') and vid:
             meta['webpage_url'] = f"https://www.youtube.com/watch?v={vid}"
         
+        # SÉCURITÉ : Remplir les métadonnées manquantes depuis le Worker
         if not meta.get('title') or meta['title'] == query:
             meta['title'] = res.get('title', query)
         if not meta.get('duration'):
@@ -317,6 +332,7 @@ async def extract(query):
         if not meta.get('thumbnail'):
             meta['thumbnail'] = res.get('thumbnail', '')
             
+        # Si le titre est toujours "Musique YouTube" ou une URL brute, forcer oEmbed
         target_vid = vid or yt_id(meta.get('webpage_url', '')) or yt_id(res.get('webpage_url', ''))
         if target_vid and (meta['title'] == "Musique YouTube" or is_url(meta['title']) or meta['uploader'] == "YouTube"):
             oembed_data = await fetch_youtube_oembed(target_vid)
@@ -331,10 +347,10 @@ async def extract(query):
         return meta
     except Exception as e:
         print(f"[STREAM ERR] Worker echoue: {e}", flush=True)
+        # Fallback : utiliser l'URL stream de yt-dlp (peut être bloquée parfois)
         if meta.get('url'):
             print("[STREAM] Utilisation de l'URL yt-dlp en fallback", flush=True)
             return meta
-
 # ══════════════════════════════════════════════════════════════════════
 def next_sync(guild):
     asyncio.run_coroutine_threadsafe(play_next(guild), bot.loop)
@@ -347,7 +363,7 @@ async def play_next(guild):
     cur = now_playing.get(guild.id)
     if cur and loops.get(guild.id):
         clone = {k: v for k, v in cur.items()
-                 if k not in ('start_time', 'pause_start', 'paused_duration', 'embed_message_id', 'seek_to')}
+                 if k not in ('start_time', 'pause_start', 'paused_duration', 'embed_message_id')}
         q.appendleft(clone)
     if not q:
         now_playing[guild.id] = None
@@ -362,20 +378,10 @@ async def play_next(guild):
         stream_url = song.get('url')
         if not stream_url:
             raise Exception("Pas d'URL de flux audio extraite")
-        
-        # Ajout du système de reprise (seek_to) après une reconnexion
-        ff_opts = FF.copy()
-        seek_time = song.get('seek_to', 0)
-        if seek_time > 0:
-            ff_opts['before_options'] = f"-ss {seek_time} " + ff_opts['before_options']
-            
         src = discord.PCMVolumeTransformer(
-            discord.FFmpegPCMAudio(stream_url, **ff_opts), volume=V(guild.id))
-        
-        song['start_time'] = datetime.datetime.now() - datetime.timedelta(seconds=seek_time)
+            discord.FFmpegPCMAudio(stream_url, **FF), volume=V(guild.id))
+        song['start_time'] = datetime.datetime.now()
         song['paused_duration'] = 0
-        song.pop('seek_to', None)
-        
         vc.play(src, after=lambda e: next_sync(guild))
         await bot.change_presence(activity=discord.Activity(
             type=discord.ActivityType.listening, name=song['title'][:50]))
@@ -386,6 +392,7 @@ async def play_next(guild):
             asyncio.create_task(update_embed_loop(guild, song, msg))
     except Exception as e:
         print(f"[PLAY ERR] {e}", flush=True)
+        # On ajoute une alerte dans Discord pour savoir pourquoi ça a coupé
         ch = bot.get_channel(MUS_CH)
         if ch:
             asyncio.create_task(ch.send(f"⚠️ Impossible de lire **{song.get('title', 'la musique')}** (Raison: `{e}`). Passage à la suite...", delete_after=15))
@@ -394,6 +401,7 @@ async def play_next(guild):
 async def run_play(guild, query, requester="?", channel=None):
     vc = guild.voice_client
     if not vc: raise Exception("Bot pas connecte au vocal")
+    # Toujours mettre en file — play_next extrait l'URL fraiche au moment de jouer
     song = {
         'title': query,
         'url': '',
@@ -404,6 +412,7 @@ async def run_play(guild, query, requester="?", channel=None):
         'original_query': query,
         'requester': requester
     }
+    # Pre-fetch metadata (titre, thumbnail, durée) pour l'embed — mais PAS l'URL stream
     try:
         meta = await extract(query)
         song['title'] = meta.get('title', query)
@@ -411,13 +420,15 @@ async def run_play(guild, query, requester="?", channel=None):
         song['thumbnail'] = meta.get('thumbnail', '')
         song['duration'] = meta.get('duration', 0)
         song['uploader'] = meta.get('uploader', '?')
+        # On garde original_query pour la re-extraction dans play_next
     except Exception as e:
         print(f"[META ERR] {e}", flush=True)
     if now_playing.get(guild.id) is not None:
         Q(guild.id).append(song)
         if channel: await channel.send(embed=added_embed(song, len(Q(guild.id))), delete_after=10)
         return song
-    now_playing[guild.id] = song
+    # Pas de musique en cours → lancer directement
+    now_playing[guild.id] = song  # placeholder pour bloquer les doubles appels
     Q(guild.id).appendleft(song)
     asyncio.create_task(play_next(guild))
     return song
@@ -615,6 +626,7 @@ async def cmd_debuglogs(ctx):
         with open("bot.log", "r", encoding="utf-8") as f:
             lines = f.readlines()
         last_lines = "".join(lines[-40:])
+        # Si trop long, couper
         if len(last_lines) > 1900:
             last_lines = last_lines[-1900:]
         await ctx.send(f"📋 **Derniers logs du bot :**\n```\n{last_lines}\n```")
@@ -686,6 +698,7 @@ async def ai_respond(user_id, username, question, guild):
     game_ctx = "\n".join(f"- {g}" for g in games) if games else "Personne ne joue actuellement."
     facts_ctx = "\n".join(f"- {f}" for f in mem.get('facts', [])) if mem.get('facts') else "Aucun fait memorise."
 
+    # Musique en cours et file d'attente pour éviter les doublons aléatoires
     cur = now_playing.get(guild.id) if guild else None
     q = list(Q(guild.id)) if guild else []
     queue_list = []
@@ -799,21 +812,22 @@ async def cmd_ask(ctx, *, question: str):
 
     remove_actions = re.findall(r'\[ACTION:REMOVE:([^\]]+)\]', response)
     for target in remove_actions:
-        target = target.strip()
         try:
-            q = list(Q(ctx.guild.id))
+            target = target.strip()
+            q = Q(ctx.guild.id)
+            lst = list(q)
             removed = None
             if target.isdigit():
                 idx = int(target)
-                if 1 <= idx <= len(q):
-                    removed = q.pop(idx - 1)
+                if 1 <= idx <= len(lst):
+                    removed = lst.pop(idx - 1)
             else:
-                for i, s in enumerate(q):
+                for i, s in enumerate(lst):
                     if target.lower() in s['title'].lower():
-                        removed = q.pop(i)
+                        removed = lst.pop(i)
                         break
             if removed:
-                queues[ctx.guild.id] = collections.deque(q)
+                queues[ctx.guild.id] = collections.deque(lst)
                 mus_ch = bot.get_channel(MUS_CH)
                 if mus_ch:
                     await mus_ch.send(f"🗑️ Supprimé par l'IA : **{removed['title']}**", delete_after=10)
@@ -911,21 +925,22 @@ async def on_message(message):
 
     remove_actions = re.findall(r'\[ACTION:REMOVE:([^\]]+)\]', response)
     for target in remove_actions:
-        target = target.strip()
         try:
-            q = list(Q(message.guild.id))
+            target = target.strip()
+            q = Q(message.guild.id)
+            lst = list(q)
             removed = None
             if target.isdigit():
                 idx = int(target)
-                if 1 <= idx <= len(q):
-                    removed = q.pop(idx - 1)
+                if 1 <= idx <= len(lst):
+                    removed = lst.pop(idx - 1)
             else:
-                for i, s in enumerate(q):
+                for i, s in enumerate(lst):
                     if target.lower() in s['title'].lower():
-                        removed = q.pop(i)
+                        removed = lst.pop(i)
                         break
             if removed:
-                queues[message.guild.id] = collections.deque(q)
+                queues[message.guild.id] = collections.deque(lst)
                 mus_ch = bot.get_channel(MUS_CH)
                 if mus_ch:
                     await mus_ch.send(f"🗑️ Supprimé par l'IA : **{removed['title']}**", delete_after=10)
@@ -956,53 +971,15 @@ async def on_message(message):
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot: return
-    gid = member.guild.id
-    
-    # CAS 1: Un humain quitte un salon
-    if before.channel:
-        humans_before = [m for m in before.channel.members if not m.bot]
-        if len(humans_before) == 0:
-            vc = member.guild.voice_client
-            # Si le bot est dans ce salon qui vient de se vider
-            if vc and vc.channel == before.channel:
-                s = now_playing.get(gid)
-                
-                # Si une musique jouait (ou était en pause), on sauvegarde son état
-                if s and (vc.is_playing() or vc.is_paused()):
-                    elapsed = get_elapsed(s)
-                    s['seek_to'] = elapsed # On garde en mémoire à quelle seconde ça a coupé
-                    s.pop('pause_start', None)
-                    s['paused_duration'] = 0
-                    
-                    # Suppression du message embed de la musique avant de quitter
-                    await delete_previous_embed(member.guild)
-                    
-                    # On la remet tout devant dans la file d'attente
-                    Q(gid).appendleft(s)
-                    now_playing[gid] = None
-                    auto_paused[gid] = True
-                    
-                    # On stoppe et on quitte le vocal pour éviter les bugs réseaux
-                    vc.stop()
-                    await vc.disconnect()
-                    print(f"[AUTO-DC] Plus personne dans le vocal, sauvegarde et déconnexion.", flush=True)
-
-    # CAS 2: Un humain rejoint un salon
-    if after.channel:
-        humans_after = [m for m in after.channel.members if not m.bot]
-        if len(humans_after) > 0 and auto_paused.get(gid):
-            auto_paused[gid] = False
-            ch = bot.get_channel(MUS_CH)
-            if ch:
-                await ch.send("👋 Quelqu'un est revenu ! Reprise de la musique...", delete_after=5)
-            
-            # Reconnexion au salon
-            vc = member.guild.voice_client
-            if not vc or not vc.is_connected():
-                await after.channel.connect()
-            
-            # Reprise de la lecture
-            asyncio.create_task(play_next(member.guild))
+    vc = member.guild.voice_client
+    if vc and vc.channel:
+        humans = [m for m in vc.channel.members if not m.bot]
+        if not humans:
+            gid = member.guild.id
+            Q(gid).clear(); loops[gid] = False; now_playing[gid] = None
+            vc.stop(); await vc.disconnect()
+            await bot.change_presence(activity=None)
+            print(f"[AUTO-DC] Plus personne dans le vocal", flush=True)
 
 # ══════════════════════════════════════════════════════════════════════
 bot.run(TOKEN)
