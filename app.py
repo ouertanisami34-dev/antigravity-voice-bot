@@ -392,6 +392,10 @@ async def play_next(guild):
             asyncio.create_task(update_embed_loop(guild, song, msg))
     except Exception as e:
         print(f"[PLAY ERR] {e}", flush=True)
+        # On ajoute une alerte dans Discord pour savoir pourquoi ça a coupé
+        ch = bot.get_channel(MUS_CH)
+        if ch:
+            asyncio.create_task(ch.send(f"⚠️ Impossible de lire **{song.get('title', 'la musique')}** (Raison: `{e}`). Passage à la suite...", delete_after=15))
         next_sync(guild)
 
 async def run_play(guild, query, requester="?", channel=None):
@@ -632,18 +636,29 @@ async def cmd_debuglogs(ctx):
 # ══════════════════════════════════════════════════════════════════════
 # IA + Mémoire
 # ══════════════════════════════════════════════════════════════════════
+local_mem_cache = {}
+
 async def load_mem(uid):
+    if uid in local_mem_cache:
+        return local_mem_cache[uid]["mem"], local_mem_cache[uid]["mid"]
+        
+    mem = {"user_id": str(uid), "facts": [], "history": []}
+    mid = None
     try:
         ch = bot.get_channel(MEM_CH) or await bot.fetch_channel(MEM_CH)
         prefix = f"MEMORY_FOR_{uid}"
-        async for m in ch.history(limit=100):
+        async for m in ch.history(limit=50):
             if m.content.startswith(prefix):
-                return json.loads(m.content[len(prefix):].strip()), m.id
+                mem = json.loads(m.content[len(prefix):].strip())
+                mid = m.id
+                break
     except Exception:
         pass
-    return {"user_id": str(uid), "facts": [], "history": []}, None
+        
+    local_mem_cache[uid] = {"mem": mem, "mid": mid}
+    return mem, mid
 
-async def save_mem(uid, mem, mid):
+async def _bg_save_mem(uid, mem, mid):
     try:
         ch = bot.get_channel(MEM_CH) or await bot.fetch_channel(MEM_CH)
         txt = f"MEMORY_FOR_{uid}\n{json.dumps(mem, ensure_ascii=False)}"
@@ -651,9 +666,15 @@ async def save_mem(uid, mem, mid):
             m = await ch.fetch_message(mid)
             await m.edit(content=txt)
         else:
-            await ch.send(content=txt)
+            m = await ch.send(content=txt)
+            if uid in local_mem_cache:
+                local_mem_cache[uid]["mid"] = m.id
     except Exception:
         pass
+
+async def save_mem(uid, mem, mid):
+    local_mem_cache[uid] = {"mem": mem, "mid": mid}
+    asyncio.create_task(_bg_save_mem(uid, mem, mid))
 
 def detect_games(guild):
     games = []
@@ -711,7 +732,7 @@ async def ai_respond(user_id, username, question, guild):
     )
 
     msgs = [{"role": "system", "content": sys_prompt}]
-    for h in (mem.get('history') or [])[-10:]:
+    for h in (mem.get('history') or [])[-6:]:  # Plus léger : 6 messages passés à l'IA
         msgs.append({"role": h["role"], "content": h["content"]})
     msgs.append({"role": "user", "content": question})
 
@@ -729,8 +750,8 @@ async def ai_respond(user_id, username, question, guild):
 
     mem.setdefault('history', []).append({"role": "user", "content": question})
     mem['history'].append({"role": "assistant", "content": ai_text})
-    if len(mem['history']) > 20:
-        mem['history'] = mem['history'][-20:]
+    if len(mem['history']) > 10:  # Limite l'historique complet à 10
+        mem['history'] = mem['history'][-10:]
     await save_mem(user_id, mem, mid)
     return ai_text
 
