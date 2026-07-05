@@ -676,6 +676,17 @@ async def ai_respond(user_id, username, question, guild):
     game_ctx = "\n".join(f"- {g}" for g in games) if games else "Personne ne joue actuellement."
     facts_ctx = "\n".join(f"- {f}" for f in mem.get('facts', [])) if mem.get('facts') else "Aucun fait memorise."
 
+    # Musique en cours et file d'attente pour Ã©viter les doublons alÃ©atoires
+    cur = now_playing.get(guild.id) if guild else None
+    q = list(Q(guild.id)) if guild else []
+    queue_list = []
+    if cur:
+        queue_list.append(f"En cours de lecture : {cur['title']}")
+    if q:
+        for i, s in enumerate(q):
+            queue_list.append(f"En attente #{i+1} : {s['title']}")
+    queue_ctx = "\n".join(queue_list) if queue_list else "Aucune musique en cours de lecture ni en attente."
+
     sys_prompt = (
         f"Tu es Antigravity, un bot Discord cool et amical. "
         f"Reponds TOUJOURS en francais, de facon concise et naturelle. Utilise des emojis.\n"
@@ -683,12 +694,15 @@ async def ai_respond(user_id, username, question, guild):
         f"Heure locale : {datetime.datetime.now().strftime('%H:%M')}.\n\n"
         f"ACTIVITES SUR LE SERVEUR :\n{game_ctx}\n\n"
         f"MEMOIRE de {username} :\n{facts_ctx}\n\n"
+        f"MUSIQUES ACTUELLES SUR LE SERVEUR :\n{queue_ctx}\n\n"
         f"CONTROLE MUSIQUE IMPORTANT :\n"
         f"Tu AS le pouvoir de controler la musique et de la faire jouer sur le serveur Discord !\n"
         f"Ne reponds JAMAIS que tu ne peux pas jouer de musique directement ou en direct. "
         f"Si l'utilisateur te demande de lancer, jouer ou mettre une chanson, tu dois simplement accepter de le faire et ajouter la balise d'action correspondante en fin de reponse.\n\n"
         f"REGLES MUSIQUE CRITIQUES :\n"
-        f"- Si l'utilisateur demande de jouer de la musique, ajoute EN FIN de ta reponse : [ACTION:PLAY:titre - artiste]\n"
+        f"- Si l'utilisateur demande de jouer de la musique (ou de l'ajouter), ajoute EN FIN de ta reponse : [ACTION:PLAY:titre - artiste]\n"
+        f"- Si l'utilisateur demande d'enlever/supprimer une musique de la file d'attente (ex: 'enleve la 3eme musique'), ajoute EN FIN de ta reponse : [ACTION:REMOVE:index] (ex: [ACTION:REMOVE:3]). L'index commence a 1 pour la premiere musique en attente.\n"
+        f"- Si l'utilisateur demande une musique ALEATOIRE (ex: 'mets une musique aleatoire de Jul'), regarde bien la liste des musiques actuelles ci-dessus et choisis obligatoirement un titre qui n'y figure PAS. Ne propose jamais une musique de Jul qui est deja en cours ou deja en attente.\n"
         f"- Si l'utilisateur demande de passer/skipper la musique, ajoute EN FIN de ta reponse : [ACTION:SKIP]\n"
         f"- Si l'utilisateur demande d'arr\u00EAter/stopper la musique, ajoute EN FIN de ta reponse : [ACTION:STOP]\n"
         f"- Si l'utilisateur demande de mettre en pause la musique, ajoute EN FIN de ta reponse : [ACTION:PAUSE]\n"
@@ -777,8 +791,23 @@ async def cmd_ask(ctx, *, question: str):
             await ctx.guild.voice_client.disconnect()
         await bot.change_presence(activity=None)
 
+    remove_actions = re.findall(r'\[ACTION:REMOVE:(\d+)\]', response)
+    for index_str in remove_actions:
+        try:
+            idx = int(index_str)
+            q = Q(ctx.guild.id)
+            if 1 <= idx <= len(q):
+                lst = list(q)
+                removed = lst.pop(idx - 1)
+                queues[ctx.guild.id] = collections.deque(lst)
+                mus_ch = bot.get_channel(MUS_CH)
+                if mus_ch:
+                    await mus_ch.send(f"\uD83D\uDDD1\uFE0F Supprim\u00E9 par l'IA : **{removed['title']}**", delete_after=10)
+        except Exception as e:
+            print(f"[AI REMOVE ERR] {e}", flush=True)
+
     actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
-    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
+    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:\d+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
     if clean: await ctx.send(f"\U0001F916 {clean}")
     
     if actions:
@@ -866,8 +895,23 @@ async def on_message(message):
             await message.guild.voice_client.disconnect()
         await bot.change_presence(activity=None)
 
+    remove_actions = re.findall(r'\[ACTION:REMOVE:(\d+)\]', response)
+    for index_str in remove_actions:
+        try:
+            idx = int(index_str)
+            q = Q(message.guild.id)
+            if 1 <= idx <= len(q):
+                lst = list(q)
+                removed = lst.pop(idx - 1)
+                queues[message.guild.id] = collections.deque(lst)
+                mus_ch = bot.get_channel(MUS_CH)
+                if mus_ch:
+                    await mus_ch.send(f"\uD83D\uDDD1\uFE0F Supprim\u00E9 par l'IA : **{removed['title']}**", delete_after=10)
+        except Exception as e:
+            print(f"[AI REMOVE ERR] {e}", flush=True)
+
     actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
-    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
+    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:\d+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
     if clean: await message.channel.send(f"\U0001F47E {clean}")
 
     if actions:
