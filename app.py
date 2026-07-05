@@ -1,14 +1,14 @@
-"""Antigravity V3 \u2014 Bot Discord Ultime (Musique + IA + Animations)"""
+"""Antigravity V3 — Bot Discord Ultime (Musique + IA + Animations)"""
 import asyncio, discord, os, sys, collections, datetime, threading
 import urllib.request, json, re, random, traceback
 from discord.ext import commands
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import yt_dlp
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 # INTERFACE MUSIQUE (Embeds)
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-# Redirection des flux pour le d\u00E9bogage en ligne
+# ══════════════════════════════════════════════════════════════════════
+# Redirection des flux pour le débogage en ligne
 class Logger(object):
     def __init__(self, filename="bot.log"):
         self.terminal = sys.stdout
@@ -27,7 +27,7 @@ sys.stderr = Logger("bot.log")
 VIOLET, BLUE, GREEN, RED, PINK, GOLD = 0x7C3AED, 0x3B82F6, 0x10B981, 0xEF4444, 0xEC4899, 0xF59E0B
 
 def fmt_dur(s):
-    if not s: return "\U0001F534 Live"
+    if not s: return "🔴 Live"
     s = int(s)
     if s >= 3600: return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
     return f"{s // 60}:{s % 60:02d}"
@@ -38,24 +38,24 @@ def get_elapsed(song):
     return max(0, int((ref - song['start_time']).total_seconds() - song.get('paused_duration', 0)))
 
 def progress_bar(elapsed, total, length=20):
-    if not total: return "\U0001F534 `[\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC]` **Live**"
+    if not total: return "🔴 `[▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬]` **Live**"
     pct = min(1.0, max(0, elapsed / total))
     filled = int(length * pct)
-    bar = "\u25AC" * filled + "\U0001F518" + "\u25AC" * max(0, length - filled - 1)
-    return f"\u25B6\uFE0F `{bar}` **[{fmt_dur(elapsed)} / {fmt_dur(total)}]**"
+    bar = "▬" * filled + "🔘" + "▬" * max(0, length - filled - 1)
+    return f"▶️ `{bar}` **[{fmt_dur(elapsed)} / {fmt_dur(total)}]**"
 
 def playing_embed(song, is_paused=False, guild_id=None):
     elapsed = get_elapsed(song)
     total = song.get('duration', 0)
-    status_icon = "\u23F8\uFE0F" if is_paused else "\u25B6\uFE0F"
+    status_icon = "⏸️" if is_paused else "▶️"
     
     em = discord.Embed(title=f"{status_icon} Lecture en cours",
         description=f"**[{song['title']}]({song.get('webpage_url', '')})**\n\n{progress_bar(elapsed, total)}", color=PINK)
     if song.get('thumbnail'): em.set_image(url=song['thumbnail'])
-    em.add_field(name="\U0001F3A4 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
-    em.add_field(name="\u23F1\uFE0F Dur\u00E9e", value=fmt_dur(total), inline=True)
+    em.add_field(name="🎤 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
+    em.add_field(name="⏱️ Durée", value=fmt_dur(total), inline=True)
     if song.get('requester'):
-        em.add_field(name="\U0001F464 Par", value=song['requester'], inline=True)
+        em.add_field(name="👤 Par", value=song['requester'], inline=True)
     if guild_id:
         q = list(Q(guild_id))
         if q:
@@ -64,19 +64,19 @@ def playing_embed(song, is_paused=False, guild_id=None):
                 lines.append(f"`#{i + 1}` **{s['title']}**")
             if len(q) > 5:
                 lines.append(f"*...et {len(q) - 5} autres morceaux*")
-            em.add_field(name="\U0001F3B6 \u00C0 venir", value="\n".join(lines), inline=False)
-    em.set_footer(text="Antigravity Music \U0001F3B6 \u2022 !skip pour passer \u2022 !queue pour la file")
+            em.add_field(name="🎶 À venir", value="\n".join(lines), inline=False)
+    em.set_footer(text="Antigravity Music 🎶 • !skip pour passer • !queue pour la file")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
 def added_embed(song, position):
-    em = discord.Embed(title="\u2705 Ajout\u00E9 \u00E0 la file d'attente",
+    em = discord.Embed(title="✅ Ajouté à la file d'attente",
         description=f"**[{song['title']}]({song.get('webpage_url', '')})**", color=GREEN)
     if song.get('thumbnail'): em.set_thumbnail(url=song['thumbnail'])
-    em.add_field(name="\u23F1\uFE0F Dur\u00E9e", value=fmt_dur(song.get('duration', 0)), inline=True)
-    em.add_field(name="\U0001F4CD Position", value=f"#{position}", inline=True)
-    em.add_field(name="\U0001F3A4 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
-    em.set_footer(text="Antigravity Music \U0001F3B6")
+    em.add_field(name="⏱️ Durée", value=fmt_dur(song.get('duration', 0)), inline=True)
+    em.add_field(name="📍 Position", value=f"#{position}", inline=True)
+    em.add_field(name="🎤 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
+    em.set_footer(text="Antigravity Music 🎶")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
@@ -108,53 +108,53 @@ async def delete_previous_embed(guild):
 
 def np_embed(song, is_paused=False, is_looped=False, volume=50):
     if not song:
-        return discord.Embed(title="\U0001F3B5 Rien en cours",
+        return discord.Embed(title="🎵 Rien en cours",
             description="Utilise `!play <titre>` pour lancer une musique !", color=VIOLET)
     elapsed = get_elapsed(song)
     total = song.get('duration', 0)
-    icon = "\u23F8\uFE0F" if is_paused else "\U0001F501" if is_looped else "\u25B6\uFE0F"
+    icon = "⏸️" if is_paused else "🔁" if is_looped else "▶️"
     status = "En pause" if is_paused else "En boucle" if is_looped else "En cours"
-    em = discord.Embed(title=f"\U0001F3B5 {song['title']}", url=song.get('webpage_url', ''), color=VIOLET,
+    em = discord.Embed(title=f"🎵 {song['title']}", url=song.get('webpage_url', ''), color=VIOLET,
         description=f"{icon} **{status}**\n\n{progress_bar(elapsed, total)}")
     if song.get('thumbnail'): em.set_thumbnail(url=song['thumbnail'])
-    em.add_field(name="\U0001F3A4 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
-    em.add_field(name="\u23F1\uFE0F Dur\u00E9e", value=fmt_dur(total), inline=True)
-    em.add_field(name="\U0001F50A Volume", value=f"{volume}%", inline=True)
-    em.set_footer(text="Antigravity Music \U0001F3B6")
+    em.add_field(name="🎤 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
+    em.add_field(name="⏱️ Durée", value=fmt_dur(total), inline=True)
+    em.add_field(name="🔊 Volume", value=f"{volume}%", inline=True)
+    em.set_footer(text="Antigravity Music 🎶")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
 def queue_embed(q_list, current, is_paused=False, is_looped=False, volume=50):
-    em = discord.Embed(title="\U0001F4CB File d'attente \u2014 Antigravity", color=BLUE)
+    em = discord.Embed(title="📋 File d'attente — Antigravity", color=BLUE)
     if current:
         elapsed = get_elapsed(current)
         total = current.get('duration', 0)
-        icon = "\u23F8\uFE0F" if is_paused else "\U0001F501" if is_looped else "\u25B6\uFE0F"
+        icon = "⏸️" if is_paused else "🔁" if is_looped else "▶️"
         em.add_field(name=f"{icon} En cours", inline=False,
             value=f"**[{current['title']}]({current.get('webpage_url', '')})**\n"
                   f"{progress_bar(elapsed, total)}")
     else:
-        em.add_field(name="\u25B6\uFE0F En cours", value="*Rien en lecture*", inline=False)
+        em.add_field(name="▶️ En cours", value="*Rien en lecture*", inline=False)
     if q_list:
         lines = []
         for i, s in enumerate(q_list[:10]):
-            lines.append(f"`{i + 1}.` **{s['title']}** \u2014 {fmt_dur(s.get('duration', 0))}")
+            lines.append(f"`{i + 1}.` **{s['title']}** — {fmt_dur(s.get('duration', 0))}")
         if len(q_list) > 10:
             lines.append(f"\n*...et {len(q_list) - 10} de plus*")
         total_dur = sum(s.get('duration', 0) for s in q_list)
         nb = len(q_list)
-        em.add_field(name=f"\U0001F3B6 \u00C0 venir \u2014 {nb} titre{'s' if nb > 1 else ''}",
+        em.add_field(name=f"🎶 À venir — {nb} titre{'s' if nb > 1 else ''}",
                      value="\n".join(lines), inline=False)
-        em.set_footer(text=f"Dur\u00E9e totale : {fmt_dur(total_dur)} \u2022 \U0001F50A {volume}% \u2022 Antigravity Music \U0001F3B6")
+        em.set_footer(text=f"Durée totale : {fmt_dur(total_dur)} • 🔊 {volume}% • Antigravity Music 🎶")
     else:
-        em.add_field(name="\U0001F3B6 \u00C0 venir", value="*File vide \u2014 `!play <titre>` pour ajouter*", inline=False)
-        em.set_footer(text=f"\U0001F50A {volume}% \u2022 Antigravity Music \U0001F3B6")
+        em.add_field(name="🎶 À venir", value="*File vide — `!play <titre>` pour ajouter*", inline=False)
+        em.set_footer(text=f"🔊 {volume}% • Antigravity Music 🎶")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-# Serveur web sant\u00E9 pour Render (obligatoire)
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
+# Serveur web santé pour Render (obligatoire)
+# ══════════════════════════════════════════════════════════════════════
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.send_header("Content-Type", "text/plain")
@@ -172,9 +172,9 @@ try:
 except Exception:
     print("[BOOT] FFmpeg static indisponible, utilisation du PATH systeme", flush=True)
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 # Configuration
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 if not TOKEN: sys.exit("[ERR] DISCORD_BOT_TOKEN manquant")
 
@@ -194,9 +194,9 @@ queues, now_playing, volumes, loops = {}, {}, {}, {}
 def Q(gid): return queues.setdefault(gid, collections.deque())
 def V(gid): return volumes.get(gid, 0.5)
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 # Garde de salon
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 MUS_CMDS = {"play", "p", "skip", "s", "pause", "resume", "stop", "queue", "q",
             "volume", "vol", "clearqueue", "cq", "remove", "rm", "loop",
             "shuffle", "np", "nowplaying", "help", "debuglogs"}
@@ -207,16 +207,16 @@ async def channel_guard(ctx):
     if ctx.channel.id != target:
         try: await ctx.message.delete()
         except discord.errors.Forbidden: pass
-        a = await ctx.send(f"\u274C {ctx.author.mention}, utilise <#{target}> pour cette commande !")
+        a = await ctx.send(f"❌ {ctx.author.mention}, utilise <#{target}> pour cette commande !")
         await asyncio.sleep(4)
         try: await a.delete()
         except discord.errors.Forbidden: pass
         return False
     return True
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 # YTDL + Extraction audio
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 YTDL_OPTS = {
     'format': 'bestaudio[acodec=opus]/bestaudio/best',
     'noplaylist': True, 'quiet': True,
@@ -225,7 +225,8 @@ YTDL_OPTS = {
     'prefer_free_formats': True,
 }
 FF = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 3',
+    # Amélioration des paramètres de reconnexion pour éviter les coupures sur Render
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1',
     'options': '-vn'
 }
 ytdl_client = yt_dlp.YoutubeDL(YTDL_OPTS)
@@ -266,14 +267,14 @@ async def fetch_youtube_oembed(vid):
 async def extract(query):
     """
     2-step extraction:
-    1. Metadata (title, duration, thumbnail, uploader) via yt-dlp/oEmbed â€” always accurate
-    2. Stream URL via Cloudflare Worker â€” avoids YouTube bot detection
+    1. Metadata (title, duration, thumbnail, uploader) via yt-dlp/oEmbed — always accurate
+    2. Stream URL via Cloudflare Worker — avoids YouTube bot detection
     Falls back to full yt-dlp stream URL if Worker fails.
     """
     query = query.strip()
     vid = yt_id(query)
 
-    # â”€â”€ Ã‰tape 1 : MÃ©tadonnÃ©es via yt-dlp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Étape 1 : Métadonnées via yt-dlp ─────────────────────────
     meta = {}
     try:
         if vid:
@@ -285,12 +286,12 @@ async def extract(query):
         d = await asyncio.to_thread(lambda: ytdl_client.extract_info(search, download=False))
         if 'entries' in d: d = d['entries'][0]
         meta = _make_song(d)
-        # RÃ©cupÃ©rer le vid depuis les mÃ©tadonnÃ©es si on ne l'avait pas
+        # Récupérer le vid depuis les métadonnées si on ne l'avait pas
         if not vid:
             vid = yt_id(meta.get('webpage_url', ''))
     except Exception as e:
         print(f"[META ERR] {e}", flush=True)
-        # SÃ‰CURITÃ‰ : RÃ©cupÃ©rer via oEmbed si c'est une vidÃ©o YouTube
+        # SÉCURITÉ : Récupérer via oEmbed si c'est une vidéo YouTube
         if vid:
             oembed_data = await fetch_youtube_oembed(vid)
             if oembed_data:
@@ -303,10 +304,10 @@ async def extract(query):
                     'uploader': oembed_data['uploader']
                 }
         if not meta:
-            meta = {'title': query, 'url': '', 'webpage_url': '',
+            meta = {'title': query, 'url': '', 'webpage_url': query if is_url(query) else '',
                     'thumbnail': '', 'duration': 0, 'uploader': '?'}
 
-    # â”€â”€ Ã‰tape 2 : URL de stream via Worker Cloudflare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Étape 2 : URL de stream via Worker Cloudflare ─────────────
     try:
         payload = json.dumps({"query": f"https://www.youtube.com/watch?v={vid}" if vid else query}).encode()
         req = urllib.request.Request(CF_MUSIC, data=payload,
@@ -316,12 +317,12 @@ async def extract(query):
         if "error" in res: raise Exception(res["error"])
         stream_url = res.get('url')
         if not stream_url: raise Exception("Pas d'URL de stream dans la reponse Worker")
-        # Combiner : mÃ©tadonnÃ©es yt-dlp + URL stream Worker
+        # Combiner : métadonnées yt-dlp + URL stream Worker
         meta['url'] = stream_url
         if not meta.get('webpage_url') and vid:
             meta['webpage_url'] = f"https://www.youtube.com/watch?v={vid}"
         
-        # SÃ‰CURITÃ‰ : Remplir les mÃ©tadonnÃ©es manquantes depuis le Worker
+        # SÉCURITÉ : Remplir les métadonnées manquantes depuis le Worker
         if not meta.get('title') or meta['title'] == query:
             meta['title'] = res.get('title', query)
         if not meta.get('duration'):
@@ -346,11 +347,11 @@ async def extract(query):
         return meta
     except Exception as e:
         print(f"[STREAM ERR] Worker echoue: {e}", flush=True)
-        # Fallback : utiliser l'URL stream de yt-dlp (peut Ãªtre bloquÃ©e parfois)
+        # Fallback : utiliser l'URL stream de yt-dlp (peut être bloquée parfois)
         if meta.get('url'):
             print("[STREAM] Utilisation de l'URL yt-dlp en fallback", flush=True)
             return meta
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 def next_sync(guild):
     asyncio.run_coroutine_threadsafe(play_next(guild), bot.loop)
 
@@ -396,7 +397,7 @@ async def play_next(guild):
 async def run_play(guild, query, requester="?", channel=None):
     vc = guild.voice_client
     if not vc: raise Exception("Bot pas connecte au vocal")
-    # Toujours mettre en file â€” play_next extrait l'URL fraiche au moment de jouer
+    # Toujours mettre en file — play_next extrait l'URL fraiche au moment de jouer
     song = {
         'title': query,
         'url': '',
@@ -407,7 +408,7 @@ async def run_play(guild, query, requester="?", channel=None):
         'original_query': query,
         'requester': requester
     }
-    # Pre-fetch metadata (titre, thumbnail, durÃ©e) pour l'embed â€” mais PAS l'URL stream
+    # Pre-fetch metadata (titre, thumbnail, durée) pour l'embed — mais PAS l'URL stream
     try:
         meta = await extract(query)
         song['title'] = meta.get('title', query)
@@ -422,31 +423,31 @@ async def run_play(guild, query, requester="?", channel=None):
         Q(guild.id).append(song)
         if channel: await channel.send(embed=added_embed(song, len(Q(guild.id))), delete_after=10)
         return song
-    # Pas de musique en cours â†’ lancer directement
+    # Pas de musique en cours → lancer directement
     now_playing[guild.id] = song  # placeholder pour bloquer les doubles appels
     Q(guild.id).appendleft(song)
     asyncio.create_task(play_next(guild))
     return song
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 # Commandes Musique
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 @bot.command(name="play", aliases=["p"])
 async def cmd_play(ctx, *, query: str):
     if not ctx.author.voice:
-        return await ctx.send("\u274C Rejoins un salon vocal d'abord !", delete_after=5)
+        return await ctx.send("❌ Rejoins un salon vocal d'abord !", delete_after=5)
     vc = ctx.voice_client
     if not vc or not vc.is_connected():
         vc = await ctx.author.voice.channel.connect()
     try: await ctx.message.delete()
     except: pass
-    msg = await ctx.send("\U0001F50D Recherche en cours...")
+    msg = await ctx.send("🔍 Recherche en cours...")
     try:
         await run_play(ctx.guild, query, ctx.author.display_name, ctx.channel)
         try: await msg.delete()
         except: pass
     except Exception as e:
-        await msg.edit(content=f"\u274C Erreur : {e}")
+        await msg.edit(content=f"❌ Erreur : {e}")
         await asyncio.sleep(5)
         try: await msg.delete()
         except: pass
@@ -457,10 +458,10 @@ async def cmd_skip(ctx):
     except: pass
     vc = ctx.voice_client
     if not vc or not vc.is_playing():
-        return await ctx.send("\u274C Rien \u00E0 skipper.", delete_after=5)
+        return await ctx.send("❌ Rien à skipper.", delete_after=5)
     loops[ctx.guild.id] = False
     vc.stop()
-    await ctx.send("\u23ED\uFE0F Skip !", delete_after=5)
+    await ctx.send("⏭️ Skip !", delete_after=5)
 
 @bot.command(name="pause")
 async def cmd_pause(ctx):
@@ -468,7 +469,7 @@ async def cmd_pause(ctx):
     except: pass
     vc = ctx.voice_client
     if not vc or not vc.is_playing():
-        return await ctx.send("\u274C Rien en cours.", delete_after=5)
+        return await ctx.send("❌ Rien en cours.", delete_after=5)
     vc.pause()
     s = now_playing.get(ctx.guild.id)
     if s:
@@ -480,7 +481,7 @@ async def cmd_pause(ctx):
                     msg = await ch.fetch_message(s['embed_message_id'])
                     await msg.edit(embed=playing_embed(s, is_paused=True, guild_id=ctx.guild.id))
             except Exception: pass
-    await ctx.send("\u23F8\uFE0F En pause.", delete_after=5)
+    await ctx.send("⏸️ En pause.", delete_after=5)
 
 @bot.command(name="resume")
 async def cmd_resume(ctx):
@@ -488,7 +489,7 @@ async def cmd_resume(ctx):
     except: pass
     vc = ctx.voice_client
     if not vc or not vc.is_paused():
-        return await ctx.send("\u274C Pas en pause.", delete_after=5)
+        return await ctx.send("❌ Pas en pause.", delete_after=5)
     s = now_playing.get(ctx.guild.id)
     if s:
         if 'pause_start' in s:
@@ -503,7 +504,7 @@ async def cmd_resume(ctx):
                     await msg.edit(embed=playing_embed(s, is_paused=False, guild_id=ctx.guild.id))
             except Exception: pass
     vc.resume()
-    await ctx.send("\u25B6\uFE0F Reprise !", delete_after=5)
+    await ctx.send("▶️ Reprise !", delete_after=5)
 
 @bot.command(name="stop")
 async def cmd_stop(ctx):
@@ -517,7 +518,7 @@ async def cmd_stop(ctx):
         ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
     await bot.change_presence(activity=None)
-    await ctx.send("\u23F9\uFE0F Arr\u00EAt\u00E9 et d\u00E9connect\u00E9.", delete_after=5)
+    await ctx.send("⏹️ Arrêté et déconnecté.", delete_after=5)
 
 @bot.command(name="queue", aliases=["q"])
 async def cmd_queue(ctx):
@@ -535,19 +536,19 @@ async def cmd_vol(ctx, level: int):
     try: await ctx.message.delete()
     except: pass
     if not (0 <= level <= 100):
-        return await ctx.send("\u274C Volume entre 0 et 100.", delete_after=5)
+        return await ctx.send("❌ Volume entre 0 et 100.", delete_after=5)
     volumes[ctx.guild.id] = level / 100
     vc = ctx.voice_client
     if vc and vc.source and hasattr(vc.source, 'volume'):
         vc.source.volume = level / 100
-    await ctx.send(f"\U0001F50A Volume : **{level}%**", delete_after=5)
+    await ctx.send(f"🔊 Volume : **{level}%**", delete_after=5)
 
 @bot.command(name="clearqueue", aliases=["cq"])
 async def cmd_cq(ctx):
     try: await ctx.message.delete()
     except: pass
     Q(ctx.guild.id).clear()
-    await ctx.send("\U0001F9F9 File d'attente vid\u00E9e !", delete_after=5)
+    await ctx.send("🧹 File d'attente vidée !", delete_after=5)
 
 @bot.command(name="remove", aliases=["rm"])
 async def cmd_rm(ctx, index: int):
@@ -555,18 +556,18 @@ async def cmd_rm(ctx, index: int):
     except: pass
     q = Q(ctx.guild.id)
     if not (1 <= index <= len(q)):
-        return await ctx.send(f"\u274C Index entre 1 et {len(q)}.", delete_after=5)
+        return await ctx.send(f"❌ Index entre 1 et {len(q)}.", delete_after=5)
     lst = list(q)
     removed = lst.pop(index - 1)
     queues[ctx.guild.id] = collections.deque(lst)
-    await ctx.send(f"\U0001F5D1\uFE0F Supprim\u00E9 : **{removed['title']}**", delete_after=5)
+    await ctx.send(f"🗑️ Supprimé : **{removed['title']}**", delete_after=5)
 
 @bot.command(name="loop")
 async def cmd_loop(ctx):
     try: await ctx.message.delete()
     except: pass
     loops[ctx.guild.id] = not loops.get(ctx.guild.id, False)
-    status = "\U0001F501 Boucle activ\u00E9e !" if loops[ctx.guild.id] else "\u27A1\uFE0F Boucle d\u00E9sactiv\u00E9e."
+    status = "🔁 Boucle activée !" if loops[ctx.guild.id] else "➡️ Boucle désactivée."
     await ctx.send(status, delete_after=5)
 
 @bot.command(name="shuffle")
@@ -575,11 +576,11 @@ async def cmd_shuffle(ctx):
     except: pass
     q = Q(ctx.guild.id)
     if len(q) < 2:
-        return await ctx.send("\u274C Pas assez de titres \u00E0 m\u00E9langer.", delete_after=5)
+        return await ctx.send("❌ Pas assez de titres à mélanger.", delete_after=5)
     lst = list(q)
     random.shuffle(lst)
     queues[ctx.guild.id] = collections.deque(lst)
-    await ctx.send(f"\U0001F500 File m\u00E9lang\u00E9e ! ({len(lst)} titres)", delete_after=5)
+    await ctx.send(f"🔀 File mélangée ! ({len(lst)} titres)", delete_after=5)
 
 @bot.command(name="np", aliases=["nowplaying"])
 async def cmd_np(ctx):
@@ -596,23 +597,23 @@ async def cmd_np(ctx):
 async def cmd_help(ctx):
     try: await ctx.message.delete()
     except: pass
-    em = discord.Embed(title="\U0001F680 Antigravity V3 \u2014 Commandes", color=0x7C3AED,
+    em = discord.Embed(title="🚀 Antigravity V3 — Commandes", color=0x7C3AED,
         description="Le bot musique et IA ultime !")
-    em.add_field(name="\U0001F3B5 Musique (dans #musique)", inline=False, value=(
-        "`!play <titre>` \u2014 Jouer / ajouter \u00E0 la file\n"
-        "`!skip` \u2014 Passer au suivant\n"
-        "`!pause` / `!resume` \u2014 Pause / Reprendre\n"
-        "`!stop` \u2014 Arr\u00EAter et d\u00E9connecter\n"
-        "`!queue` \u2014 Voir la file d'attente\n"
-        "`!np` \u2014 Titre en cours + progression\n"
-        "`!volume <0-100>` \u2014 R\u00E9gler le volume\n"
-        "`!loop` \u2014 Activer/d\u00E9sactiver la boucle\n"
-        "`!shuffle` \u2014 M\u00E9langer la file\n"
-        "`!remove <n>` \u2014 Supprimer le titre #n\n"
-        "`!clearqueue` \u2014 Vider toute la file"))
-    em.add_field(name="\U0001F916 IA (dans #mini-ngr)", inline=False,
-        value="Parle directement ! Ou utilise `!ask ta question` pour parler \u00E0 l'IA.")
-    em.set_footer(text="Antigravity V3 \U0001F3B6 \u2022 Cr\u00E9\u00E9 avec \u2764\uFE0F")
+    em.add_field(name="🎵 Musique (dans #musique)", inline=False, value=(
+        "`!play <titre>` — Jouer / ajouter à la file\n"
+        "`!skip` — Passer au suivant\n"
+        "`!pause` / `!resume` — Pause / Reprendre\n"
+        "`!stop` — Arrêter et déconnecter\n"
+        "`!queue` — Voir la file d'attente\n"
+        "`!np` — Titre en cours + progression\n"
+        "`!volume <0-100>` — Régler le volume\n"
+        "`!loop` — Activer/désactiver la boucle\n"
+        "`!shuffle` — Mélanger la file\n"
+        "`!remove <n>` — Supprimer le titre #n\n"
+        "`!clearqueue` — Vider toute la file"))
+    em.add_field(name="🤖 IA (dans #mini-ngr)", inline=False,
+        value="Parle directement ! Ou utilise `!ask ta question` pour parler à l'IA.")
+    em.set_footer(text="Antigravity V3 🎶 • Créé avec ❤️")
     await ctx.send(embed=em, delete_after=30)
 
 @bot.command(name="debuglogs")
@@ -624,13 +625,13 @@ async def cmd_debuglogs(ctx):
         # Si trop long, couper
         if len(last_lines) > 1900:
             last_lines = last_lines[-1900:]
-        await ctx.send(f"\U0001F4CB **Derniers logs du bot :**\n```\n{last_lines}\n```")
+        await ctx.send(f"📋 **Derniers logs du bot :**\n```\n{last_lines}\n```")
     except Exception as e:
-        await ctx.send(f"\u274C Impossible de lire les logs : {e}")
+        await ctx.send(f"❌ Impossible de lire les logs : {e}")
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-# IA + M\u00E9moire
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
+# IA + Mémoire
+# ══════════════════════════════════════════════════════════════════════
 async def load_mem(uid):
     try:
         ch = bot.get_channel(MEM_CH) or await bot.fetch_channel(MEM_CH)
@@ -676,7 +677,7 @@ async def ai_respond(user_id, username, question, guild):
     game_ctx = "\n".join(f"- {g}" for g in games) if games else "Personne ne joue actuellement."
     facts_ctx = "\n".join(f"- {f}" for f in mem.get('facts', [])) if mem.get('facts') else "Aucun fait memorise."
 
-    # Musique en cours et file d'attente pour Ã©viter les doublons alÃ©atoires
+    # Musique en cours et file d'attente pour éviter les doublons aléatoires
     cur = now_playing.get(guild.id) if guild else None
     q = list(Q(guild.id)) if guild else []
     queue_list = []
@@ -697,19 +698,16 @@ async def ai_respond(user_id, username, question, guild):
         f"MUSIQUES ACTUELLES SUR LE SERVEUR :\n{queue_ctx}\n\n"
         f"CONTROLE MUSIQUE IMPORTANT :\n"
         f"Tu AS le pouvoir de controler la musique et de la faire jouer sur le serveur Discord !\n"
-        f"Ne reponds JAMAIS que tu ne peux pas jouer de musique directement ou en direct. "
-        f"Si l'utilisateur te demande de lancer, jouer ou mettre une chanson, tu dois simplement accepter de le faire et ajouter la balise d'action correspondante en fin de reponse.\n\n"
-        f"REGLES MUSIQUE CRITIQUES :\n"
-        f"- Si l'utilisateur demande de jouer de la musique (ou de l'ajouter), ajoute EN FIN de ta reponse : [ACTION:PLAY:titre - artiste]\n"
-        f"- Si l'utilisateur demande d'enlever/supprimer une musique de la file d'attente (ex: 'enleve la 3eme musique'), ajoute EN FIN de ta reponse : [ACTION:REMOVE:index] (ex: [ACTION:REMOVE:3]). L'index commence a 1 pour la premiere musique en attente.\n"
-        f"- Si l'utilisateur demande une musique ALEATOIRE (ex: 'mets une musique aleatoire de Jul'), regarde bien la liste des musiques actuelles ci-dessus et choisis obligatoirement un titre qui n'y figure PAS. Ne propose jamais une musique de Jul qui est deja en cours ou deja en attente.\n"
-        f"- Si l'utilisateur demande de passer/skipper la musique, ajoute EN FIN de ta reponse : [ACTION:SKIP]\n"
-        f"- Si l'utilisateur demande d'arr\u00EAter/stopper la musique, ajoute EN FIN de ta reponse : [ACTION:STOP]\n"
-        f"- Si l'utilisateur demande de mettre en pause la musique, ajoute EN FIN de ta reponse : [ACTION:PAUSE]\n"
-        f"- Si l'utilisateur demande de reprendre la lecture, ajoute EN FIN de ta reponse : [ACTION:RESUME]\n"
-        f"- Pour une LISTE (ex: '10 musiques de funk'), genere UNE balise play par musique.\n"
-        f"- Le format EXACT de play est : [ACTION:PLAY:Titre - Artiste]\n"
-        f"Exemple de bonne reponse: 'Pas de soucis, je te mets Billie Jean de Michael Jackson !' suivi de [ACTION:PLAY:Billie Jean - Michael Jackson]"
+        f"Ne reponds JAMAIS que tu ne peux pas jouer de musique. Si l'utilisateur te demande de lancer/retirer une chanson, accepte et ajoute la balise en fin de reponse.\n\n"
+        f"REGLES MUSIQUE CRITIQUES (Genere UNE SEULE balise d'action en fin de reponse, jamais de doublons) :\n"
+        f"- Si l'utilisateur donne un LIEN / URL (youtube, etc.), utilise EXACTEMENT ce lien : [ACTION:PLAY:le_lien]\n"
+        f"- Si l'utilisateur demande de jouer un titre, utilise : [ACTION:PLAY:Titre - Artiste]\n"
+        f"- Si l'utilisateur demande de SUPPRIMER ou ENLEVER une musique (ex: 'enleve la 2eme musique'), regarde la liste 'MUSIQUES ACTUELLES' ci-dessus et utilise OBLIGATOIREMENT : [ACTION:REMOVE:index] (ex: [ACTION:REMOVE:2] pour enlever la musique 'En attente #2').\n"
+        f"- Si l'utilisateur demande une musique ALEATOIRE, choisis un titre qui n'est PAS dans la liste actuelle.\n"
+        f"- Si l'utilisateur demande de passer/skipper, ajoute uniquement : [ACTION:SKIP]\n"
+        f"- Si l'utilisateur demande d'arrêter/stopper, ajoute uniquement : [ACTION:STOP]\n"
+        f"- Si l'utilisateur demande pause ou reprendre, utilise [ACTION:PAUSE] ou [ACTION:RESUME]\n"
+        f"Exemple de bonne reponse: 'Je te mets ca tout de suite !' suivi de [ACTION:PLAY:https://youtu.be/hNbg9Jsdq9A]"
     )
 
     msgs = [{"role": "system", "content": sys_prompt}]
@@ -736,12 +734,12 @@ async def ai_respond(user_id, username, question, guild):
     await save_mem(user_id, mem, mid)
     return ai_text
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-# \u00C9v\u00E9nements et Commande Ask
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
+# Événements et Commande Ask
+# ══════════════════════════════════════════════════════════════════════
 @bot.command(name="ask", aliases=["ia", "chat"])
 async def cmd_ask(ctx, *, question: str):
-    """Commande pour parler \u00E0 l'IA directement (fallback)"""
+    """Commande pour parler à l'IA directement (fallback)"""
     async with ctx.typing():
         response = await ai_respond(
             ctx.author.id, ctx.author.display_name,
@@ -802,13 +800,13 @@ async def cmd_ask(ctx, *, question: str):
                 queues[ctx.guild.id] = collections.deque(lst)
                 mus_ch = bot.get_channel(MUS_CH)
                 if mus_ch:
-                    await mus_ch.send(f"\uD83D\uDDD1\uFE0F Supprim\u00E9 par l'IA : **{removed['title']}**", delete_after=10)
+                    await mus_ch.send(f"🗑️ Supprimé par l'IA : **{removed['title']}**", delete_after=10)
         except Exception as e:
             print(f"[AI REMOVE ERR] {e}", flush=True)
 
     actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
     clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:\d+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
-    if clean: await ctx.send(f"\U0001F916 {clean}")
+    if clean: await ctx.send(f"🤖 {clean}")
     
     if actions:
         mus_ch = bot.get_channel(MUS_CH)
@@ -819,13 +817,13 @@ async def cmd_ask(ctx, *, question: str):
                     if ctx.author.voice:
                         vc = await ctx.author.voice.channel.connect()
                     else:
-                        await ctx.send("\u274C Rejoins un vocal pour la musique !")
+                        await ctx.send("❌ Rejoins un vocal pour la musique !")
                         break
                 await run_play(ctx.guild, title.strip(), "Antigravity IA", mus_ch)
                 if i < len(actions) - 1: await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"[AI PLAY ERR] {title}: {e}", flush=True)
-                await ctx.send(f"\u274C Erreur pour **{title.strip()}** : {e}")
+                await ctx.send(f"❌ Erreur pour **{title.strip()}** : {e}")
 
 @bot.event
 async def on_ready():
@@ -836,7 +834,7 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CheckFailure): return
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"\u274C Argument manquant. Ex: `!play jul alien`")
+        await ctx.send(f"❌ Argument manquant. Ex: `!play jul alien`")
     elif isinstance(error, commands.CommandNotFound): pass
     else: print(f"[CMD ERR] {ctx.command}: {error}", flush=True)
 
@@ -906,13 +904,13 @@ async def on_message(message):
                 queues[message.guild.id] = collections.deque(lst)
                 mus_ch = bot.get_channel(MUS_CH)
                 if mus_ch:
-                    await mus_ch.send(f"\uD83D\uDDD1\uFE0F Supprim\u00E9 par l'IA : **{removed['title']}**", delete_after=10)
+                    await mus_ch.send(f"🗑️ Supprimé par l'IA : **{removed['title']}**", delete_after=10)
         except Exception as e:
             print(f"[AI REMOVE ERR] {e}", flush=True)
 
     actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
     clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:\d+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
-    if clean: await message.channel.send(f"\U0001F47E {clean}")
+    if clean: await message.channel.send(f"👾 {clean}")
 
     if actions:
         mus_ch = bot.get_channel(MUS_CH)
@@ -923,13 +921,13 @@ async def on_message(message):
                     if message.author.voice:
                         vc = await message.author.voice.channel.connect()
                     else:
-                        await message.channel.send("\u274C Rejoins un vocal pour la musique !")
+                        await message.channel.send("❌ Rejoins un vocal pour la musique !")
                         break
                 await run_play(message.guild, title.strip(), "Antigravity IA", mus_ch)
                 if i < len(actions) - 1: await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"[AI PLAY ERR] {title}: {e}", flush=True)
-                await message.channel.send(f"\u274C Erreur pour **{title.strip()}** : {e}")
+                await message.channel.send(f"❌ Erreur pour **{title.strip()}** : {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -944,5 +942,5 @@ async def on_voice_state_update(member, before, after):
             await bot.change_presence(activity=None)
             print(f"[AUTO-DC] Plus personne dans le vocal", flush=True)
 
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# ══════════════════════════════════════════════════════════════════════
 bot.run(TOKEN)
