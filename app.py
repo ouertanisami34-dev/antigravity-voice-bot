@@ -226,7 +226,7 @@ YTDL_OPTS = {
 }
 FF = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -ar 48000 -ac 2 -b:a 192k'
+    'options': '-vn'
 }
 ytdl_client = yt_dlp.YoutubeDL(YTDL_OPTS)
 
@@ -310,35 +310,37 @@ async def play_next(guild):
 async def run_play(guild, query, requester="?", channel=None):
     vc = guild.voice_client
     if not vc: raise Exception("Bot pas connecte au vocal")
+    # Toujours mettre en file â€” play_next extrait l'URL fraiche au moment de jouer
+    song = {
+        'title': query,
+        'url': '',
+        'webpage_url': '',
+        'thumbnail': '',
+        'duration': 0,
+        'uploader': '...',
+        'original_query': query,
+        'requester': requester
+    }
+    # Pre-fetch metadata (titre, thumbnail, durÃ©e) pour l'embed â€” mais PAS l'URL stream
+    try:
+        meta = await extract(query)
+        song['title'] = meta.get('title', query)
+        song['webpage_url'] = meta.get('webpage_url', '')
+        song['thumbnail'] = meta.get('thumbnail', '')
+        song['duration'] = meta.get('duration', 0)
+        song['uploader'] = meta.get('uploader', '?')
+        # On garde original_query pour la re-extraction dans play_next
+    except Exception as e:
+        print(f"[META ERR] {e}", flush=True)
     if now_playing.get(guild.id) is not None:
-        song = {
-            'title': query,
-            'url': '',
-            'webpage_url': '',
-            'thumbnail': '',
-            'duration': 0,
-            'uploader': 'Attente de lecture...',
-            'original_query': query,
-            'requester': requester
-        }
         Q(guild.id).append(song)
         if channel: await channel.send(embed=added_embed(song, len(Q(guild.id))), delete_after=10)
         return song
-    song = await extract(query)
-    song['original_query'] = query
-    song['requester'] = requester
-    now_playing[guild.id] = song
-    src = discord.PCMVolumeTransformer(
-        discord.FFmpegPCMAudio(song['url'], **FF), volume=V(guild.id))
-    song['start_time'] = datetime.datetime.now()
-    song['paused_duration'] = 0
-    vc.play(src, after=lambda e: next_sync(guild))
-    await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.listening, name=song['title'][:50]))
-    if channel:
-        msg = await channel.send(embed=playing_embed(song, False, guild.id))
-        song['embed_message_id'] = msg.id
-        asyncio.create_task(update_embed_loop(guild, song, msg))
+    # Pas de musique en cours â†’ lancer directement
+    now_playing[guild.id] = song  # placeholder pour bloquer les doubles appels
+    Q(guild.id).appendleft(song)
+    now_playing[guild.id] = None  # reset pour que play_next prenne la main
+    asyncio.create_task(play_next(guild))
     return song
 
 # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
@@ -607,7 +609,7 @@ async def ai_respond(user_id, username, question, guild):
     )
 
     msgs = [{"role": "system", "content": sys_prompt}]
-    for h in (mem.get('history') or [])[-6:]:
+    for h in (mem.get('history') or [])[-10:]:
         msgs.append({"role": h["role"], "content": h["content"]})
     msgs.append({"role": "user", "content": question})
 
@@ -625,8 +627,8 @@ async def ai_respond(user_id, username, question, guild):
 
     mem.setdefault('history', []).append({"role": "user", "content": question})
     mem['history'].append({"role": "assistant", "content": ai_text})
-    if len(mem['history']) > 12:
-        mem['history'] = mem['history'][-12:]
+    if len(mem['history']) > 20:
+        mem['history'] = mem['history'][-20:]
     await save_mem(user_id, mem, mid)
     return ai_text
 
