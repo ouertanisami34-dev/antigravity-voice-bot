@@ -702,7 +702,7 @@ async def ai_respond(user_id, username, question, guild):
         f"REGLES MUSIQUE CRITIQUES (Genere UNE SEULE balise d'action en fin de reponse, jamais de doublons) :\n"
         f"- Si l'utilisateur donne un LIEN / URL (youtube, etc.), utilise EXACTEMENT ce lien : [ACTION:PLAY:le_lien]\n"
         f"- Si l'utilisateur demande de jouer un titre, utilise : [ACTION:PLAY:Titre - Artiste]\n"
-        f"- Si l'utilisateur demande de SUPPRIMER ou ENLEVER une musique (ex: 'enleve la 2eme musique'), regarde la liste 'MUSIQUES ACTUELLES' ci-dessus et utilise OBLIGATOIREMENT : [ACTION:REMOVE:index] (ex: [ACTION:REMOVE:2] pour enlever la musique 'En attente #2').\n"
+        f"- Si l'utilisateur demande de SUPPRIMER ou ENLEVER une musique (par son NUMERO ou son TITRE, ex: 'enleve la 2', 'retire Billie Jean'), regarde la liste 'MUSIQUES ACTUELLES' ci-dessus. Utilise OBLIGATOIREMENT : [ACTION:REMOVE:numero_ou_titre] (ex: [ACTION:REMOVE:2] ou [ACTION:REMOVE:Billie Jean]). INTERDICTION FORMELLE DE GENERER UNE BALISE PLAY SI L'UTILISATEUR DEMANDE DE SUPPRIMER.\n"
         f"- Si l'utilisateur demande une musique ALEATOIRE, choisis un titre qui n'est PAS dans la liste actuelle.\n"
         f"- Si l'utilisateur demande de passer/skipper, ajoute uniquement : [ACTION:SKIP]\n"
         f"- Si l'utilisateur demande d'arrêter/stopper, ajoute uniquement : [ACTION:STOP]\n"
@@ -789,14 +789,23 @@ async def cmd_ask(ctx, *, question: str):
             await ctx.guild.voice_client.disconnect()
         await bot.change_presence(activity=None)
 
-    remove_actions = re.findall(r'\[ACTION:REMOVE:(\d+)\]', response)
-    for index_str in remove_actions:
+    remove_actions = re.findall(r'\[ACTION:REMOVE:([^\]]+)\]', response)
+    for target in remove_actions:
         try:
-            idx = int(index_str)
+            target = target.strip()
             q = Q(ctx.guild.id)
-            if 1 <= idx <= len(q):
-                lst = list(q)
-                removed = lst.pop(idx - 1)
+            lst = list(q)
+            removed = None
+            if target.isdigit():
+                idx = int(target)
+                if 1 <= idx <= len(lst):
+                    removed = lst.pop(idx - 1)
+            else:
+                for i, s in enumerate(lst):
+                    if target.lower() in s['title'].lower():
+                        removed = lst.pop(i)
+                        break
+            if removed:
                 queues[ctx.guild.id] = collections.deque(lst)
                 mus_ch = bot.get_channel(MUS_CH)
                 if mus_ch:
@@ -805,7 +814,7 @@ async def cmd_ask(ctx, *, question: str):
             print(f"[AI REMOVE ERR] {e}", flush=True)
 
     actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
-    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:\d+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
+    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
     if clean: await ctx.send(f"🤖 {clean}")
     
     if actions:
@@ -893,14 +902,23 @@ async def on_message(message):
             await message.guild.voice_client.disconnect()
         await bot.change_presence(activity=None)
 
-    remove_actions = re.findall(r'\[ACTION:REMOVE:(\d+)\]', response)
-    for index_str in remove_actions:
+    remove_actions = re.findall(r'\[ACTION:REMOVE:([^\]]+)\]', response)
+    for target in remove_actions:
         try:
-            idx = int(index_str)
+            target = target.strip()
             q = Q(message.guild.id)
-            if 1 <= idx <= len(q):
-                lst = list(q)
-                removed = lst.pop(idx - 1)
+            lst = list(q)
+            removed = None
+            if target.isdigit():
+                idx = int(target)
+                if 1 <= idx <= len(lst):
+                    removed = lst.pop(idx - 1)
+            else:
+                for i, s in enumerate(lst):
+                    if target.lower() in s['title'].lower():
+                        removed = lst.pop(i)
+                        break
+            if removed:
                 queues[message.guild.id] = collections.deque(lst)
                 mus_ch = bot.get_channel(MUS_CH)
                 if mus_ch:
@@ -909,7 +927,7 @@ async def on_message(message):
             print(f"[AI REMOVE ERR] {e}", flush=True)
 
     actions = re.findall(r'\[ACTION:(?:PLAY|QUEUE):([^\]]+)\]', response)
-    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:\d+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
+    clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|QUEUE:[^\]]+|REMOVE:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
     if clean: await message.channel.send(f"👾 {clean}")
 
     if actions:
