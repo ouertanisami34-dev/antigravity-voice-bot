@@ -6,7 +6,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import yt_dlp
 
 # ═══════════════════════════════════════════════════════════════
-# INTERFACE MUSIQUE (Embeds)
+# INTERFACE GRAPHIQUE MUSIQUE (Embeds)
 # ═══════════════════════════════════════════════════════════════
 VIOLET, BLUE, GREEN, RED, PINK, GOLD = 0x7C3AED, 0x3B82F6, 0x10B981, 0xEF4444, 0xEC4899, 0xF59E0B
 
