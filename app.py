@@ -1,23 +1,3 @@
-C'est une idée incroyable ! Oui, nous pouvons donner à l'IA de **mini-NGR** le **contrôle vocal direct de la musique par la parole** !
-
-Grâce à cette mise à jour, si vous discutez avec le bot dans le chat et lui demandez de gérer la musique, il va comprendre votre intention et exécuter l'action en arrière-plan.
-
-### Exemples de ce que vous pourrez faire :
-* 💬 **Vous :** `!ask mini-NGR, joue du PNL s'il te plait`
-  * 👾 **mini-NGR :** *Pas de soucis frérot, je te lance ça direct !* (Et il rejoint votre salon vocal et lance la musique).
-* 💬 **Vous :** `!ask mini-NGR, passe cette musique de merde`
-  * 👾 **mini-NGR :** *Ça marche, je passe au morceau suivant !* (Et il fait le skip).
-* 💬 **Vous :** `!ask mini-NGR, coupe le son`
-  * 👾 **mini-NGR :** *Pas de problème, j'éteins tout et je déco.* (Et il s'arrête et quitte le vocal).
-
----
-
-### Étape 1 : Mettre à jour `app.py` sur GitHub
-👉 [https://github.com/ouertanisami34-dev/antigravity-voice-bot/edit/main/app.py](https://github.com/ouertanisami34-dev/antigravity-voice-bot/edit/main/app.py)
-
-Remplacez **tout** le code par cette version intelligente :
-
-```python
 import asyncio
 import discord
 from discord.ext import commands
@@ -827,4 +807,3 @@ async def volume(ctx, level: int):
     await ctx.send(f"🔊 Volume : **{level}%**")
 
 bot.run(TOKEN)
-```
