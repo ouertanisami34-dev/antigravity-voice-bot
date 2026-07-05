@@ -1,14 +1,14 @@
-"""Antigravity V3 â€” Bot Discord Ultime (Musique + IA + Animations)"""
+"""Antigravity V3 \u2014 Bot Discord Ultime (Musique + IA + Animations)"""
 import asyncio, discord, os, sys, collections, datetime, threading
 import urllib.request, json, re, random, traceback
 from discord.ext import commands
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import yt_dlp
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # INTERFACE MUSIQUE (Embeds)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Redirection des flux pour le dÃ©bogage en ligne
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# Redirection des flux pour le d\u00E9bogage en ligne
 class Logger(object):
     def __init__(self, filename="bot.log"):
         self.terminal = sys.stdout
@@ -27,7 +27,7 @@ sys.stderr = Logger("bot.log")
 VIOLET, BLUE, GREEN, RED, PINK, GOLD = 0x7C3AED, 0x3B82F6, 0x10B981, 0xEF4444, 0xEC4899, 0xF59E0B
 
 def fmt_dur(s):
-    if not s: return "ðŸ”´ Live"
+    if not s: return "\U0001F534 Live"
     s = int(s)
     if s >= 3600: return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
     return f"{s // 60}:{s % 60:02d}"
@@ -38,24 +38,24 @@ def get_elapsed(song):
     return max(0, int((ref - song['start_time']).total_seconds() - song.get('paused_duration', 0)))
 
 def progress_bar(elapsed, total, length=20):
-    if not total: return "ðŸ”´ `[â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬â–¬]` **Live**"
+    if not total: return "\U0001F534 `[\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC\u25AC]` **Live**"
     pct = min(1.0, max(0, elapsed / total))
     filled = int(length * pct)
-    bar = "â–¬" * filled + "ðŸ”˜" + "â–¬" * max(0, length - filled - 1)
-    return f"â–¶ï¸ `{bar}` **[{fmt_dur(elapsed)} / {fmt_dur(total)}]**"
+    bar = "\u25AC" * filled + "\U0001F518" + "\u25AC" * max(0, length - filled - 1)
+    return f"\u25B6\uFE0F `{bar}` **[{fmt_dur(elapsed)} / {fmt_dur(total)}]**"
 
 def playing_embed(song, is_paused=False, guild_id=None):
     elapsed = get_elapsed(song)
     total = song.get('duration', 0)
-    status_icon = "â¸ï¸" if is_paused else "â–¶ï¸"
+    status_icon = "\u23F8\uFE0F" if is_paused else "\u25B6\uFE0F"
     
     em = discord.Embed(title=f"{status_icon} Lecture en cours",
         description=f"**[{song['title']}]({song.get('webpage_url', '')})**\n\n{progress_bar(elapsed, total)}", color=PINK)
     if song.get('thumbnail'): em.set_image(url=song['thumbnail'])
-    em.add_field(name="ðŸŽ¤ Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
-    em.add_field(name="â±ï¸ DurÃ©e", value=fmt_dur(total), inline=True)
+    em.add_field(name="\U0001F3A4 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
+    em.add_field(name="\u23F1\uFE0F Dur\u00E9e", value=fmt_dur(total), inline=True)
     if song.get('requester'):
-        em.add_field(name="ðŸ‘¤ Par", value=song['requester'], inline=True)
+        em.add_field(name="\U0001F464 Par", value=song['requester'], inline=True)
     if guild_id:
         q = list(Q(guild_id))
         if q:
@@ -64,19 +64,19 @@ def playing_embed(song, is_paused=False, guild_id=None):
                 lines.append(f"`#{i + 1}` **{s['title']}**")
             if len(q) > 5:
                 lines.append(f"*...et {len(q) - 5} autres morceaux*")
-            em.add_field(name="ðŸŽ¶ Ã€ venir", value="\n".join(lines), inline=False)
-    em.set_footer(text="Antigravity Music ðŸŽ¶ â€¢ !skip pour passer â€¢ !queue pour la file")
+            em.add_field(name="\U0001F3B6 \u00C0 venir", value="\n".join(lines), inline=False)
+    em.set_footer(text="Antigravity Music \U0001F3B6 \u2022 !skip pour passer \u2022 !queue pour la file")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
 def added_embed(song, position):
-    em = discord.Embed(title="âœ… AjoutÃ© Ã  la file d'attente",
+    em = discord.Embed(title="\u2705 Ajout\u00E9 \u00E0 la file d'attente",
         description=f"**[{song['title']}]({song.get('webpage_url', '')})**", color=GREEN)
     if song.get('thumbnail'): em.set_thumbnail(url=song['thumbnail'])
-    em.add_field(name="â±ï¸ DurÃ©e", value=fmt_dur(song.get('duration', 0)), inline=True)
-    em.add_field(name="ðŸ“ Position", value=f"#{position}", inline=True)
-    em.add_field(name="ðŸŽ¤ Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
-    em.set_footer(text="Antigravity Music ðŸŽ¶")
+    em.add_field(name="\u23F1\uFE0F Dur\u00E9e", value=fmt_dur(song.get('duration', 0)), inline=True)
+    em.add_field(name="\U0001F4CD Position", value=f"#{position}", inline=True)
+    em.add_field(name="\U0001F3A4 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
+    em.set_footer(text="Antigravity Music \U0001F3B6")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
@@ -108,53 +108,53 @@ async def delete_previous_embed(guild):
 
 def np_embed(song, is_paused=False, is_looped=False, volume=50):
     if not song:
-        return discord.Embed(title="ðŸŽµ Rien en cours",
+        return discord.Embed(title="\U0001F3B5 Rien en cours",
             description="Utilise `!play <titre>` pour lancer une musique !", color=VIOLET)
     elapsed = get_elapsed(song)
     total = song.get('duration', 0)
-    icon = "â¸ï¸" if is_paused else "ðŸ”" if is_looped else "â–¶ï¸"
+    icon = "\u23F8\uFE0F" if is_paused else "\U0001F501" if is_looped else "\u25B6\uFE0F"
     status = "En pause" if is_paused else "En boucle" if is_looped else "En cours"
-    em = discord.Embed(title=f"ðŸŽµ {song['title']}", url=song.get('webpage_url', ''), color=VIOLET,
+    em = discord.Embed(title=f"\U0001F3B5 {song['title']}", url=song.get('webpage_url', ''), color=VIOLET,
         description=f"{icon} **{status}**\n\n{progress_bar(elapsed, total)}")
     if song.get('thumbnail'): em.set_thumbnail(url=song['thumbnail'])
-    em.add_field(name="ðŸŽ¤ Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
-    em.add_field(name="â±ï¸ DurÃ©e", value=fmt_dur(total), inline=True)
-    em.add_field(name="ðŸ”Š Volume", value=f"{volume}%", inline=True)
-    em.set_footer(text="Antigravity Music ðŸŽ¶")
+    em.add_field(name="\U0001F3A4 Artiste", value=song.get('uploader', 'Inconnu'), inline=True)
+    em.add_field(name="\u23F1\uFE0F Dur\u00E9e", value=fmt_dur(total), inline=True)
+    em.add_field(name="\U0001F50A Volume", value=f"{volume}%", inline=True)
+    em.set_footer(text="Antigravity Music \U0001F3B6")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
 def queue_embed(q_list, current, is_paused=False, is_looped=False, volume=50):
-    em = discord.Embed(title="ðŸ“‹ File d'attente â€” Antigravity", color=BLUE)
+    em = discord.Embed(title="\U0001F4CB File d'attente \u2014 Antigravity", color=BLUE)
     if current:
         elapsed = get_elapsed(current)
         total = current.get('duration', 0)
-        icon = "â¸ï¸" if is_paused else "ðŸ”" if is_looped else "â–¶ï¸"
+        icon = "\u23F8\uFE0F" if is_paused else "\U0001F501" if is_looped else "\u25B6\uFE0F"
         em.add_field(name=f"{icon} En cours", inline=False,
             value=f"**[{current['title']}]({current.get('webpage_url', '')})**\n"
                   f"{progress_bar(elapsed, total)}")
     else:
-        em.add_field(name="â–¶ï¸ En cours", value="*Rien en lecture*", inline=False)
+        em.add_field(name="\u25B6\uFE0F En cours", value="*Rien en lecture*", inline=False)
     if q_list:
         lines = []
         for i, s in enumerate(q_list[:10]):
-            lines.append(f"`{i + 1}.` **{s['title']}** â€” {fmt_dur(s.get('duration', 0))}")
+            lines.append(f"`{i + 1}.` **{s['title']}** \u2014 {fmt_dur(s.get('duration', 0))}")
         if len(q_list) > 10:
             lines.append(f"\n*...et {len(q_list) - 10} de plus*")
         total_dur = sum(s.get('duration', 0) for s in q_list)
         nb = len(q_list)
-        em.add_field(name=f"ðŸŽ¶ Ã€ venir â€” {nb} titre{'s' if nb > 1 else ''}",
+        em.add_field(name=f"\U0001F3B6 \u00C0 venir \u2014 {nb} titre{'s' if nb > 1 else ''}",
                      value="\n".join(lines), inline=False)
-        em.set_footer(text=f"DurÃ©e totale : {fmt_dur(total_dur)} â€¢ ðŸ”Š {volume}% â€¢ Antigravity Music ðŸŽ¶")
+        em.set_footer(text=f"Dur\u00E9e totale : {fmt_dur(total_dur)} \u2022 \U0001F50A {volume}% \u2022 Antigravity Music \U0001F3B6")
     else:
-        em.add_field(name="ðŸŽ¶ Ã€ venir", value="*File vide â€” `!play <titre>` pour ajouter*", inline=False)
-        em.set_footer(text=f"ðŸ”Š {volume}% â€¢ Antigravity Music ðŸŽ¶")
+        em.add_field(name="\U0001F3B6 \u00C0 venir", value="*File vide \u2014 `!play <titre>` pour ajouter*", inline=False)
+        em.set_footer(text=f"\U0001F50A {volume}% \u2022 Antigravity Music \U0001F3B6")
     em.timestamp = datetime.datetime.now(datetime.timezone.utc)
     return em
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Serveur web santÃ© pour Render (obligatoire)
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# Serveur web sant\u00E9 pour Render (obligatoire)
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.send_header("Content-Type", "text/plain")
@@ -172,9 +172,9 @@ try:
 except Exception:
     print("[BOOT] FFmpeg static indisponible, utilisation du PATH systeme", flush=True)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # Configuration
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 if not TOKEN: sys.exit("[ERR] DISCORD_BOT_TOKEN manquant")
 
@@ -194,9 +194,9 @@ queues, now_playing, volumes, loops = {}, {}, {}, {}
 def Q(gid): return queues.setdefault(gid, collections.deque())
 def V(gid): return volumes.get(gid, 0.5)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # Garde de salon
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 MUS_CMDS = {"play", "p", "skip", "s", "pause", "resume", "stop", "queue", "q",
             "volume", "vol", "clearqueue", "cq", "remove", "rm", "loop",
             "shuffle", "np", "nowplaying", "help", "debuglogs"}
@@ -207,16 +207,16 @@ async def channel_guard(ctx):
     if ctx.channel.id != target:
         try: await ctx.message.delete()
         except discord.errors.Forbidden: pass
-        a = await ctx.send(f"âŒ {ctx.author.mention}, utilise <#{target}> pour cette commande !")
+        a = await ctx.send(f"\u274C {ctx.author.mention}, utilise <#{target}> pour cette commande !")
         await asyncio.sleep(4)
         try: await a.delete()
         except discord.errors.Forbidden: pass
         return False
     return True
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # YTDL + Extraction audio
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 YTDL_OPTS = {
     'format': 'bestaudio[acodec=opus]/bestaudio/best',
     'noplaylist': True, 'quiet': True,
@@ -262,9 +262,9 @@ async def extract(query):
         if 'entries' in d: d = d['entries'][0]
         return _make_song(d)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # Moteur audio
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 def next_sync(guild):
     asyncio.run_coroutine_threadsafe(play_next(guild), bot.loop)
 
@@ -341,25 +341,25 @@ async def run_play(guild, query, requester="?", channel=None):
         asyncio.create_task(update_embed_loop(guild, song, msg))
     return song
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 # Commandes Musique
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 @bot.command(name="play", aliases=["p"])
 async def cmd_play(ctx, *, query: str):
     if not ctx.author.voice:
-        return await ctx.send("âŒ Rejoins un salon vocal d'abord !", delete_after=5)
+        return await ctx.send("\u274C Rejoins un salon vocal d'abord !", delete_after=5)
     vc = ctx.voice_client
     if not vc or not vc.is_connected():
         vc = await ctx.author.voice.channel.connect()
     try: await ctx.message.delete()
     except: pass
-    msg = await ctx.send("ðŸ” Recherche en cours...")
+    msg = await ctx.send("\U0001F50D Recherche en cours...")
     try:
         await run_play(ctx.guild, query, ctx.author.display_name, ctx.channel)
         try: await msg.delete()
         except: pass
     except Exception as e:
-        await msg.edit(content=f"âŒ Erreur : {e}")
+        await msg.edit(content=f"\u274C Erreur : {e}")
         await asyncio.sleep(5)
         try: await msg.delete()
         except: pass
@@ -370,10 +370,10 @@ async def cmd_skip(ctx):
     except: pass
     vc = ctx.voice_client
     if not vc or not vc.is_playing():
-        return await ctx.send("âŒ Rien Ã  skipper.", delete_after=5)
+        return await ctx.send("\u274C Rien \u00E0 skipper.", delete_after=5)
     loops[ctx.guild.id] = False
     vc.stop()
-    await ctx.send("â­ï¸ Skip !", delete_after=5)
+    await ctx.send("\u23ED\uFE0F Skip !", delete_after=5)
 
 @bot.command(name="pause")
 async def cmd_pause(ctx):
@@ -381,7 +381,7 @@ async def cmd_pause(ctx):
     except: pass
     vc = ctx.voice_client
     if not vc or not vc.is_playing():
-        return await ctx.send("âŒ Rien en cours.", delete_after=5)
+        return await ctx.send("\u274C Rien en cours.", delete_after=5)
     vc.pause()
     s = now_playing.get(ctx.guild.id)
     if s:
@@ -393,7 +393,7 @@ async def cmd_pause(ctx):
                     msg = await ch.fetch_message(s['embed_message_id'])
                     await msg.edit(embed=playing_embed(s, is_paused=True, guild_id=ctx.guild.id))
             except Exception: pass
-    await ctx.send("â¸ï¸ En pause.", delete_after=5)
+    await ctx.send("\u23F8\uFE0F En pause.", delete_after=5)
 
 @bot.command(name="resume")
 async def cmd_resume(ctx):
@@ -401,7 +401,7 @@ async def cmd_resume(ctx):
     except: pass
     vc = ctx.voice_client
     if not vc or not vc.is_paused():
-        return await ctx.send("âŒ Pas en pause.", delete_after=5)
+        return await ctx.send("\u274C Pas en pause.", delete_after=5)
     s = now_playing.get(ctx.guild.id)
     if s:
         if 'pause_start' in s:
@@ -416,7 +416,7 @@ async def cmd_resume(ctx):
                     await msg.edit(embed=playing_embed(s, is_paused=False, guild_id=ctx.guild.id))
             except Exception: pass
     vc.resume()
-    await ctx.send("â–¶ï¸ Reprise !", delete_after=5)
+    await ctx.send("\u25B6\uFE0F Reprise !", delete_after=5)
 
 @bot.command(name="stop")
 async def cmd_stop(ctx):
@@ -430,7 +430,7 @@ async def cmd_stop(ctx):
         ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
     await bot.change_presence(activity=None)
-    await ctx.send("â¹ï¸ ArrÃªtÃ© et dÃ©connectÃ©.", delete_after=5)
+    await ctx.send("\u23F9\uFE0F Arr\u00EAt\u00E9 et d\u00E9connect\u00E9.", delete_after=5)
 
 @bot.command(name="queue", aliases=["q"])
 async def cmd_queue(ctx):
@@ -448,19 +448,19 @@ async def cmd_vol(ctx, level: int):
     try: await ctx.message.delete()
     except: pass
     if not (0 <= level <= 100):
-        return await ctx.send("âŒ Volume entre 0 et 100.", delete_after=5)
+        return await ctx.send("\u274C Volume entre 0 et 100.", delete_after=5)
     volumes[ctx.guild.id] = level / 100
     vc = ctx.voice_client
     if vc and vc.source and hasattr(vc.source, 'volume'):
         vc.source.volume = level / 100
-    await ctx.send(f"ðŸ”Š Volume : **{level}%**", delete_after=5)
+    await ctx.send(f"\U0001F50A Volume : **{level}%**", delete_after=5)
 
 @bot.command(name="clearqueue", aliases=["cq"])
 async def cmd_cq(ctx):
     try: await ctx.message.delete()
     except: pass
     Q(ctx.guild.id).clear()
-    await ctx.send("ðŸ§¹ File d'attente vidÃ©e !", delete_after=5)
+    await ctx.send("\U0001F9F9 File d'attente vid\u00E9e !", delete_after=5)
 
 @bot.command(name="remove", aliases=["rm"])
 async def cmd_rm(ctx, index: int):
@@ -468,18 +468,18 @@ async def cmd_rm(ctx, index: int):
     except: pass
     q = Q(ctx.guild.id)
     if not (1 <= index <= len(q)):
-        return await ctx.send(f"âŒ Index entre 1 et {len(q)}.", delete_after=5)
+        return await ctx.send(f"\u274C Index entre 1 et {len(q)}.", delete_after=5)
     lst = list(q)
     removed = lst.pop(index - 1)
     queues[ctx.guild.id] = collections.deque(lst)
-    await ctx.send(f"ðŸ—‘ï¸ SupprimÃ© : **{removed['title']}**", delete_after=5)
+    await ctx.send(f"\U0001F5D1\uFE0F Supprim\u00E9 : **{removed['title']}**", delete_after=5)
 
 @bot.command(name="loop")
 async def cmd_loop(ctx):
     try: await ctx.message.delete()
     except: pass
     loops[ctx.guild.id] = not loops.get(ctx.guild.id, False)
-    status = "ðŸ” Boucle activÃ©e !" if loops[ctx.guild.id] else "âž¡ï¸ Boucle dÃ©sactivÃ©e."
+    status = "\U0001F501 Boucle activ\u00E9e !" if loops[ctx.guild.id] else "\u27A1\uFE0F Boucle d\u00E9sactiv\u00E9e."
     await ctx.send(status, delete_after=5)
 
 @bot.command(name="shuffle")
@@ -488,11 +488,11 @@ async def cmd_shuffle(ctx):
     except: pass
     q = Q(ctx.guild.id)
     if len(q) < 2:
-        return await ctx.send("âŒ Pas assez de titres Ã  mÃ©langer.", delete_after=5)
+        return await ctx.send("\u274C Pas assez de titres \u00E0 m\u00E9langer.", delete_after=5)
     lst = list(q)
     random.shuffle(lst)
     queues[ctx.guild.id] = collections.deque(lst)
-    await ctx.send(f"ðŸ”€ File mÃ©langÃ©e ! ({len(lst)} titres)", delete_after=5)
+    await ctx.send(f"\U0001F500 File m\u00E9lang\u00E9e ! ({len(lst)} titres)", delete_after=5)
 
 @bot.command(name="np", aliases=["nowplaying"])
 async def cmd_np(ctx):
@@ -509,23 +509,23 @@ async def cmd_np(ctx):
 async def cmd_help(ctx):
     try: await ctx.message.delete()
     except: pass
-    em = discord.Embed(title="ðŸš€ Antigravity V3 â€” Commandes", color=0x7C3AED,
+    em = discord.Embed(title="\U0001F680 Antigravity V3 \u2014 Commandes", color=0x7C3AED,
         description="Le bot musique et IA ultime !")
-    em.add_field(name="ðŸŽµ Musique (dans #musique)", inline=False, value=(
-        "`!play <titre>` â€” Jouer / ajouter Ã  la file\n"
-        "`!skip` â€” Passer au suivant\n"
-        "`!pause` / `!resume` â€” Pause / Reprendre\n"
-        "`!stop` â€” ArrÃªter et dÃ©connecter\n"
-        "`!queue` â€” Voir la file d'attente\n"
-        "`!np` â€” Titre en cours + progression\n"
-        "`!volume <0-100>` â€” RÃ©gler le volume\n"
-        "`!loop` â€” Activer/dÃ©sactiver la boucle\n"
-        "`!shuffle` â€” MÃ©langer la file\n"
-        "`!remove <n>` â€” Supprimer le titre #n\n"
-        "`!clearqueue` â€” Vider toute la file"))
-    em.add_field(name="ðŸ¤– IA (dans #mini-ngr)", inline=False,
-        value="Parle directement ! Ou utilise `!ask ta question` pour parler Ã  l'IA.")
-    em.set_footer(text="Antigravity V3 ðŸŽ¶ â€¢ CrÃ©Ã© avec â¤ï¸")
+    em.add_field(name="\U0001F3B5 Musique (dans #musique)", inline=False, value=(
+        "`!play <titre>` \u2014 Jouer / ajouter \u00E0 la file\n"
+        "`!skip` \u2014 Passer au suivant\n"
+        "`!pause` / `!resume` \u2014 Pause / Reprendre\n"
+        "`!stop` \u2014 Arr\u00EAter et d\u00E9connecter\n"
+        "`!queue` \u2014 Voir la file d'attente\n"
+        "`!np` \u2014 Titre en cours + progression\n"
+        "`!volume <0-100>` \u2014 R\u00E9gler le volume\n"
+        "`!loop` \u2014 Activer/d\u00E9sactiver la boucle\n"
+        "`!shuffle` \u2014 M\u00E9langer la file\n"
+        "`!remove <n>` \u2014 Supprimer le titre #n\n"
+        "`!clearqueue` \u2014 Vider toute la file"))
+    em.add_field(name="\U0001F916 IA (dans #mini-ngr)", inline=False,
+        value="Parle directement ! Ou utilise `!ask ta question` pour parler \u00E0 l'IA.")
+    em.set_footer(text="Antigravity V3 \U0001F3B6 \u2022 Cr\u00E9\u00E9 avec \u2764\uFE0F")
     await ctx.send(embed=em, delete_after=30)
 
 @bot.command(name="debuglogs")
@@ -537,13 +537,13 @@ async def cmd_debuglogs(ctx):
         # Si trop long, couper
         if len(last_lines) > 1900:
             last_lines = last_lines[-1900:]
-        await ctx.send(f"ðŸ“‹ **Derniers logs du bot :**\n```\n{last_lines}\n```")
+        await ctx.send(f"\U0001F4CB **Derniers logs du bot :**\n```\n{last_lines}\n```")
     except Exception as e:
-        await ctx.send(f"âŒ Impossible de lire les logs : {e}")
+        await ctx.send(f"\u274C Impossible de lire les logs : {e}")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# IA + MÃ©moire
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# IA + M\u00E9moire
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 async def load_mem(uid):
     try:
         ch = bot.get_channel(MEM_CH) or await bot.fetch_channel(MEM_CH)
@@ -599,7 +599,7 @@ async def ai_respond(user_id, username, question, guild):
         f"REGLES MUSIQUE CRITIQUES :\n"
         f"- Si l'utilisateur demande de jouer de la musique, ajoute EN FIN de ta reponse : [ACTION:PLAY:titre - artiste]\n"
         f"- Si l'utilisateur demande de passer/skipper la musique, ajoute EN FIN de ta reponse : [ACTION:SKIP]\n"
-        f"- Si l'utilisateur demande d'arrÃªter/stopper la musique, ajoute EN FIN de ta reponse : [ACTION:STOP]\n"
+        f"- Si l'utilisateur demande d'arr\u00EAter/stopper la musique, ajoute EN FIN de ta reponse : [ACTION:STOP]\n"
         f"- Si l'utilisateur demande de mettre en pause la musique, ajoute EN FIN de ta reponse : [ACTION:PAUSE]\n"
         f"- Si l'utilisateur demande de reprendre la lecture, ajoute EN FIN de ta reponse : [ACTION:RESUME]\n"
         f"- Pour une LISTE (ex: '10 musiques de funk'), genere UNE balise play par musique.\n"
@@ -630,12 +630,12 @@ async def ai_respond(user_id, username, question, guild):
     await save_mem(user_id, mem, mid)
     return ai_text
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Ã‰vÃ©nements et Commande Ask
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+# \u00C9v\u00E9nements et Commande Ask
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 @bot.command(name="ask", aliases=["ia", "chat"])
 async def cmd_ask(ctx, *, question: str):
-    """Commande pour parler Ã  l'IA directement (fallback)"""
+    """Commande pour parler \u00E0 l'IA directement (fallback)"""
     async with ctx.typing():
         response = await ai_respond(
             ctx.author.id, ctx.author.display_name,
@@ -687,7 +687,7 @@ async def cmd_ask(ctx, *, question: str):
 
     actions = re.findall(r'\[ACTION:PLAY:([^\]]+)\]', response)
     clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
-    if clean: await ctx.send(f"ðŸ¤– {clean}")
+    if clean: await ctx.send(f"\U0001F916 {clean}")
     
     if actions:
         mus_ch = bot.get_channel(MUS_CH)
@@ -698,13 +698,13 @@ async def cmd_ask(ctx, *, question: str):
                     if ctx.author.voice:
                         vc = await ctx.author.voice.channel.connect()
                     else:
-                        await ctx.send("âŒ Rejoins un vocal pour la musique !")
+                        await ctx.send("\u274C Rejoins un vocal pour la musique !")
                         break
                 await run_play(ctx.guild, title.strip(), "Antigravity IA", mus_ch)
                 if i < len(actions) - 1: await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"[AI PLAY ERR] {title}: {e}", flush=True)
-                await ctx.send(f"âŒ Erreur pour **{title.strip()}** : {e}")
+                await ctx.send(f"\u274C Erreur pour **{title.strip()}** : {e}")
 
 @bot.event
 async def on_ready():
@@ -715,7 +715,7 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CheckFailure): return
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"âŒ Argument manquant. Ex: `!play jul alien`")
+        await ctx.send(f"\u274C Argument manquant. Ex: `!play jul alien`")
     elif isinstance(error, commands.CommandNotFound): pass
     else: print(f"[CMD ERR] {ctx.command}: {error}", flush=True)
 
@@ -776,7 +776,7 @@ async def on_message(message):
 
     actions = re.findall(r'\[ACTION:PLAY:([^\]]+)\]', response)
     clean = re.sub(r'\s*\[ACTION:(?:PLAY:[^\]]+|SKIP|PAUSE|RESUME|STOP)\]', '', response).strip()
-    if clean: await message.channel.send(f"ðŸ‘¾ {clean}")
+    if clean: await message.channel.send(f"\U0001F47E {clean}")
 
     if actions:
         mus_ch = bot.get_channel(MUS_CH)
@@ -787,13 +787,13 @@ async def on_message(message):
                     if message.author.voice:
                         vc = await message.author.voice.channel.connect()
                     else:
-                        await message.channel.send("âŒ Rejoins un vocal pour la musique !")
+                        await message.channel.send("\u274C Rejoins un vocal pour la musique !")
                         break
                 await run_play(message.guild, title.strip(), "Antigravity IA", mus_ch)
                 if i < len(actions) - 1: await asyncio.sleep(1.5)
             except Exception as e:
                 print(f"[AI PLAY ERR] {title}: {e}", flush=True)
-                await message.channel.send(f"âŒ Erreur pour **{title.strip()}** : {e}")
+                await message.channel.send(f"\u274C Erreur pour **{title.strip()}** : {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -808,5 +808,5 @@ async def on_voice_state_update(member, before, after):
             await bot.change_presence(activity=None)
             print(f"[AUTO-DC] Plus personne dans le vocal", flush=True)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 bot.run(TOKEN)
