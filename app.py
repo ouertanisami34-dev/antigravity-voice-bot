@@ -8,6 +8,22 @@ import yt_dlp
 # ═══════════════════════════════════════════════════════════════
 # INTERFACE MUSIQUE (Embeds)
 # ═══════════════════════════════════════════════════════════════
+# Redirection des flux pour le débogage en ligne
+class Logger(object):
+    def __init__(self, filename="bot.log"):
+        self.terminal = sys.stdout
+        self.log = open(filename, "a", encoding="utf-8")
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+sys.stdout = Logger("bot.log")
+sys.stderr = Logger("bot.log")
+
 VIOLET, BLUE, GREEN, RED, PINK, GOLD = 0x7C3AED, 0x3B82F6, 0x10B981, 0xEF4444, 0xEC4899, 0xF59E0B
 
 def fmt_dur(s):
@@ -144,7 +160,7 @@ def V(gid): return volumes.get(gid, 0.5)
 # ═══════════════════════════════════════════════════════════════
 MUS_CMDS = {"play", "p", "skip", "s", "pause", "resume", "stop", "queue", "q",
             "volume", "vol", "clearqueue", "cq", "remove", "rm", "loop",
-            "shuffle", "np", "nowplaying", "help"}
+            "shuffle", "np", "nowplaying", "help", "debuglogs"}
 
 @bot.check
 async def channel_guard(ctx):
@@ -404,6 +420,18 @@ async def cmd_help(ctx):
         value="Parle directement ! Ou utilise `!ask ta question` pour parler à l'IA.")
     em.set_footer(text="Antigravity V3 🎶 • Créé avec ❤️")
     await ctx.send(embed=em)
+
+@bot.command(name="debuglogs")
+async def cmd_debuglogs(ctx):
+    try:
+        with open("bot.log", "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        last_lines = "".join(lines[-40:])
+        if len(last_lines) > 1900:
+            last_lines = last_lines[-1900:]
+        await ctx.send(f"📋 **Derniers logs du bot :**\n```\n{last_lines}\n```")
+    except Exception as e:
+        await ctx.send(f"❌ Impossible de lire les logs : {e}")
 
 # ═══════════════════════════════════════════════════════════════
 # IA + Mémoire
