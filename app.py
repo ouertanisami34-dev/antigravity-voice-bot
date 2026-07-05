@@ -111,7 +111,7 @@ async def extract_audio(query):
                 'uploader': data.get('uploader', 'Inconnu'),
             }
 
-        # Sinon, on utilise le pont Cloudflare (Piped/Invidious bypass)
+        # Sinon, on utilise le pont Cloudflare
         print(f"[CLOUDFLARE PROXY] Appel du pont /music pour YouTube", flush=True)
         payload = {}
         if video_id:
@@ -126,11 +126,16 @@ async def extract_audio(query):
             method="POST"
         )
         
-        response = await asyncio.to_thread(
-            lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
-        )
+        try:
+            response = await asyncio.to_thread(
+                lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
+            )
+        except urllib.error.HTTPError as he:
+            error_details = he.read().decode("utf-8")
+            print(f"[CLOUDFLARE ERREUR DETEE] {error_details}", flush=True)
+            raise Exception(f"Cloudflare : {error_details}")
+            
         res_data = json.loads(response)
-        
         if "error" in res_data:
             raise Exception(res_data["error"])
             
