@@ -58,7 +58,8 @@ intents.guilds = True
 intents.presences = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+# Charger tous les membres et presences au démarrage
+bot = commands.Bot(command_prefix="!", intents=intents, chunk_guilds_at_startup=True)
 
 # ============================================================
 # Base de donnees d'activite horaire en memoire
@@ -69,6 +70,35 @@ hourly_events = {
     "bot_songs": set(),
     "chatters": set()
 }
+
+# ============================================================
+# Sécurité : Vérifier si la question est bien liée à la musique
+# ============================================================
+def is_music_request(question):
+    q = question.lower().strip()
+    
+    # Mots-clés indiquant une question sur les jeux ou une salutation simple (ne jamais lancer de musique)
+    neutral_keywords = [
+        "quel jeu", "à quoi je", "qui joue", "tu fais quoi", "bonjour", "salut", 
+        "ça va", "hello", "coucou", "qui est en ligne", "qu'est-ce que", "qui écoute"
+    ]
+    for kw in neutral_keywords:
+        if kw in q:
+            return False
+            
+    # Mots-clés de musique typiques
+    music_keywords = [
+        "joue", "mets", "met", "lance", "écoute", "chante", "musique", "son", 
+        "chanson", "play", "music", "song", "url", "youtube", "spotify"
+    ]
+    if any(kw in q for kw in music_keywords):
+        return True
+        
+    # Si le message est très court (max 4 mots, ex: "pnl da" ou "jul"), on accepte comme demande de musique
+    if len(q.split()) <= 4:
+        return True
+        
+    return False
 
 # ============================================================
 # Modérateur de salons (Restriction des commandes)
@@ -454,6 +484,14 @@ async def on_ready():
     print(f"[OK] {bot.user} connecte — {len(bot.guilds)} serveur(s)", flush=True)
     # Lancement de la boucle d'activite horaire en arriere-plan
     bot.loop.create_task(hourly_loop())
+    
+    # Forcer le chunking de tous les serveurs pour charger les presences des membres
+    for guild in bot.guilds:
+        try:
+            await guild.chunk()
+            print(f"[CHUNK] Serveur {guild.name} charge avec succes.", flush=True)
+        except Exception as e:
+            print(f"[CHUNK ERREUR] Impossible de charger {guild.name} : {e}", flush=True)
 
 @bot.event
 async def on_message(message):
@@ -606,11 +644,14 @@ async def run_ask(ctx, question):
             else:
                 await ctx.reply(f"👾 {ai_response}")
 
-            # 4. Exécuter l'action musicale détectée par l'IA
+            # 4. Exécuter l'action musicale détectée par l'IA (avec contrôle de sécurité)
             if action_type:
                 await asyncio.sleep(0.5) # Délai naturel
                 if action_type == "PLAY" and action_arg:
-                    await run_play(ctx, action_arg)
+                    if is_music_request(question):
+                        await run_play(ctx, action_arg)
+                    else:
+                        print(f"[SECURITY] PLAY filtre pour la question hors-sujet musique : '{question}'", flush=True)
                 elif action_type == "SKIP":
                     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
                         ctx.voice_client.stop()
