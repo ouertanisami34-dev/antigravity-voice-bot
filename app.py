@@ -9,13 +9,11 @@ import datetime
 import traceback
 import threading
 import urllib.request
-import urllib.parse
 import json
-import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================================
-# Serveur web minimal pour Render
+# Serveur web minimal pour Render (Port 10000)
 # ============================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -31,7 +29,7 @@ threading.Thread(
     target=lambda: HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever(),
     daemon=True
 ).start()
-print(f"[BOOT] Serveur web sur le port {port}", flush=True)
+print(f"[BOOT] Serveur web active sur le port {port}", flush=True)
 
 # ============================================================
 # Configuration
@@ -52,16 +50,22 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
-# Configuration YTDL & FFmpeg (Uniquement pour le fallback non-YouTube)
+# Configuration YTDL (Bypass Bot detection) & FFmpeg
 # ============================================================
 YTDL_OPTS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
+    'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
     'nocheckcertificate': True,
     'geo_bypass': True,
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android'], # Le client android ne declenche pas le blocage bot !
+        }
+    },
 }
 
 FFMPEG_OPTS = {
@@ -81,99 +85,32 @@ def get_vol(gid):
     return volumes.get(gid, 0.5)
 
 # ============================================================
-# Instances Piped et extraction Video ID
-# ============================================================
-PIPED_INSTANCES = [
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.adminforge.de",
-    "https://api.piped.yt",
-]
-
-def get_yt_video_id(url):
-    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/)|youtu\.be/)([^?&\s]+)'
-    match = re.search(pattern, url)
-    return match.group(1) if match else None
-
-async def search_piped(query):
-    encoded = urllib.parse.quote(query)
-    for instance in PIPED_INSTANCES:
-        try:
-            url = f"{instance}/search?q={encoded}&filter=music_songs"
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=5).read().decode("utf-8"))
-            items = json.loads(data).get("items", [])
-            if items:
-                video_url = f"https://www.youtube.com{items[0].get('url', '')}"
-                return video_url
-        except Exception as e:
-            print(f"[PIPED SEARCH] {instance} echoue : {e}", flush=True)
-            continue
-    return None
-
-# ============================================================
-# Extraction Audio via Piped (Bypasse completement le blocage YouTube)
+# Extraction audio
 # ============================================================
 async def extract_audio(query):
-    print(f"[EXTRACTION] Query : '{query}'", flush=True)
+    print(f"[YTDL] Extraction : '{query}'", flush=True)
     try:
-        # 1. Recuperer le Video ID YouTube
-        video_id = get_yt_video_id(query)
-        if not video_id:
-            # Si c'est un texte, faire la recherche
-            found_url = await search_piped(query)
-            if found_url:
-                video_id = get_yt_video_id(found_url)
+        data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
+        if 'entries' in data:
+            if not data['entries']:
+                raise Exception("Aucun resultat trouve.")
+            data = data['entries'][0]
         
-        # 2. Si ce n'est pas du YouTube (ex: SoundCloud), fallback sur yt-dlp
-        if not video_id:
-            if query.startswith(('http://', 'https://')):
-                print(f"[YTDL FALLBACK] Extraction via yt-dlp pour : {query}", flush=True)
-                data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
-                if 'entries' in data:
-                    data = data['entries'][0]
-                return {
-                    'title': data.get('title', 'Inconnu'),
-                    'url': data.get('url'),
-                    'webpage_url': data.get('webpage_url', ''),
-                    'thumbnail': data.get('thumbnail', ''),
-                    'duration': data.get('duration', 0),
-                    'uploader': data.get('uploader', 'Inconnu'),
-                }
-            raise Exception("Aucun resultat trouve.")
+        if not data.get('url'):
+            raise Exception("Pas d'URL audio trouvee.")
 
-        # 3. Recuperer le flux audio brut via Piped API (Jamais bloque)
-        print(f"[PIPED STREAM] Recuperation des flux pour : {video_id}", flush=True)
-        for instance in PIPED_INSTANCES:
-            try:
-                url = f"{instance}/streams/{video_id}"
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=5).read().decode("utf-8"))
-                res_json = json.loads(data)
-                
-                audio_streams = res_json.get("audioStreams", [])
-                if not audio_streams:
-                    continue
-                
-                # Prendre le flux audio avec le meilleur bitrate
-                best_stream = max(audio_streams, key=lambda s: s.get("bitrate", 0))
-                
-                info = {
-                    'title': res_json.get('title', 'Inconnu'),
-                    'url': best_stream.get('url'),
-                    'webpage_url': f"https://www.youtube.com/watch?v={video_id}",
-                    'thumbnail': res_json.get('thumbnailUrl', ''),
-                    'duration': res_json.get('duration', 0),
-                    'uploader': res_json.get('uploader', 'Inconnu'),
-                }
-                print(f"[PIPED OK] Flux recupere : {info['title']}", flush=True)
-                return info
-            except Exception as e:
-                print(f"[PIPED STREAM] Echec {instance} : {e}", flush=True)
-                continue
-                
-        raise Exception("Les serveurs de flux YouTube sont indisponibles.")
+        info = {
+            'title': data.get('title', 'Inconnu'),
+            'url': data.get('url'),
+            'webpage_url': data.get('webpage_url', ''),
+            'thumbnail': data.get('thumbnail', ''),
+            'duration': data.get('duration', 0),
+            'uploader': data.get('uploader', 'Inconnu'),
+        }
+        print(f"[YTDL OK] {info['title']}", flush=True)
+        return info
     except Exception as e:
-        print(f"[EXTRACTION ERREUR] {e}", flush=True)
+        print(f"[YTDL ERREUR] {e}", flush=True)
         raise e
 
 def fmt_dur(s):
@@ -198,6 +135,7 @@ def play_next(guild):
             volume=get_vol(guild.id)
         )
         vc.play(src, after=lambda e: play_next(guild))
+        print(f"[PLAY] {song['title']}", flush=True)
     except Exception as e:
         print(f"[PLAY ERREUR] {e}", flush=True)
 
@@ -233,7 +171,7 @@ async def save_memory(user_id, memory_obj, message_id):
         print(f"[MEMOIRE] Erreur sauvegarde : {e}", flush=True)
 
 # ============================================================
-# Appel API Zhipu AI (Avec limitation stricte de tokens)
+# Appel API Zhipu AI (glm-4-flash)
 # ============================================================
 async def call_ai(user_id, username, question, memory_obj):
     # Detection apprentissage
@@ -246,10 +184,10 @@ async def call_ai(user_id, username, question, memory_obj):
         if new_fact not in memory_obj.get("facts", []):
             memory_obj.setdefault("facts", []).append(new_fact)
 
-    # Prompt systeme optimise pour la concision (max 200 tokens)
+    # Prompt systeme optimise pour la concision
     system_prompt = (
         "Tu es un robot amical nommé Antigravity. Réponds de manière EXTRÊMEMENT concise et courte "
-        "(maximum 1 ou 2 phrases courtes, moins de 50 mots). Va droit au but, élimine tout détail inutile."
+        "(maximum 1 ou 2 phrases courtes, moins de 50 mots). Va droit au but, supprime les éléments non importants pour faire court."
     )
     system_prompt += f"\nL'utilisateur actuel s'appelle {username} (ID: {user_id})."
     if memory_obj.get("facts"):
@@ -263,11 +201,11 @@ async def call_ai(user_id, username, question, memory_obj):
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": question})
 
-    # Appel API avec limite strict max_tokens
+    # Appel API (Limite physique strict max_tokens)
     payload = json.dumps({
         "model": "glm-4-flash",
         "messages": messages,
-        "max_tokens": 150 # Limite physique a 150 tokens pour faire court
+        "max_tokens": 150 # Coupe le blabla inutile au bout de 150 tokens (~110 mots)
     }).encode("utf-8")
 
     req = urllib.request.Request(
