@@ -1,3 +1,23 @@
+C'est une idée incroyable ! Oui, nous pouvons donner à l'IA de **mini-NGR** le **contrôle vocal direct de la musique par la parole** !
+
+Grâce à cette mise à jour, si vous discutez avec le bot dans le chat et lui demandez de gérer la musique, il va comprendre votre intention et exécuter l'action en arrière-plan.
+
+### Exemples de ce que vous pourrez faire :
+* 💬 **Vous :** `!ask mini-NGR, joue du PNL s'il te plait`
+  * 👾 **mini-NGR :** *Pas de soucis frérot, je te lance ça direct !* (Et il rejoint votre salon vocal et lance la musique).
+* 💬 **Vous :** `!ask mini-NGR, passe cette musique de merde`
+  * 👾 **mini-NGR :** *Ça marche, je passe au morceau suivant !* (Et il fait le skip).
+* 💬 **Vous :** `!ask mini-NGR, coupe le son`
+  * 👾 **mini-NGR :** *Pas de problème, j'éteins tout et je déco.* (Et il s'arrête et quitte le vocal).
+
+---
+
+### Étape 1 : Mettre à jour `app.py` sur GitHub
+👉 [https://github.com/ouertanisami34-dev/antigravity-voice-bot/edit/main/app.py](https://github.com/ouertanisami34-dev/antigravity-voice-bot/edit/main/app.py)
+
+Remplacez **tout** le code par cette version intelligente :
+
+```python
 import asyncio
 import discord
 from discord.ext import commands
@@ -41,18 +61,63 @@ if not TOKEN:
 
 ZHIPU_API_KEY = "d67596b18ee34cf0b4bdc4b67d2d6cca.3GvLAH1h06OzPXiR"
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
 MEMORY_CHANNEL_ID = 1523012733975658637
+MUSIC_CHANNEL_ID = 1523144828341325905
+MINI_NGR_CHANNEL_ID = 1523147101670735972
 
 # Ponts Cloudflare
 CLOUDFLARE_VOICE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
 CLOUDFLARE_MUSIC_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/music"
 
+# Activation de tous les intents indispensables pour pister l'activite
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.guilds = True
+intents.presences = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ============================================================
+# Base de donnees d'activite horaire en memoire
+# ============================================================
+hourly_events = {
+    "games": set(),
+    "songs": set(),
+    "bot_songs": set(),
+    "chatters": set()
+}
+
+# ============================================================
+# Modérateur de salons (Restriction des commandes)
+# ============================================================
+@bot.check
+async def check_command_channels(ctx):
+    music_commands = {"play", "p", "pause", "resume", "skip", "s", "stop", "queue", "q", "volume", "vol"}
+    ai_commands = {"ask", "trigger_hourly", "timer", "alarm", "remind", "poll", "userinfo", "serverinfo"}
+
+    target_channel = None
+    if ctx.command.name in music_commands:
+        target_channel = MUSIC_CHANNEL_ID
+    elif ctx.command.name in ai_commands:
+        target_channel = MINI_NGR_CHANNEL_ID
+
+    if target_channel and ctx.channel.id != target_channel:
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+        alert = await ctx.send(f"❌ {ctx.author.mention}, utilise le salon <#{target_channel}> pour cette commande !")
+        await asyncio.sleep(5)
+        try:
+            await alert.delete()
+        except Exception:
+            pass
+        return False
+
+    return True
 
 # ============================================================
 # Configuration YTDL & FFmpeg (Fallback SoundCloud, etc.)
@@ -95,8 +160,7 @@ async def extract_audio(query):
     print(f"[EXTRACTION] Query : '{query}'", flush=True)
     try:
         video_id = get_yt_video_id(query)
-        
-        # Si ce n'est pas du YouTube (ex: SoundCloud), extraction standard sur Render
+
         if not video_id and query.startswith(('http://', 'https://')):
             print(f"[YTDL FALLBACK] Extraction standard pour : {query}", flush=True)
             data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
@@ -111,21 +175,20 @@ async def extract_audio(query):
                 'uploader': data.get('uploader', 'Inconnu'),
             }
 
-        # Sinon, on utilise le pont Cloudflare
         print(f"[CLOUDFLARE PROXY] Appel du pont /music pour YouTube", flush=True)
         payload = {}
         if video_id:
             payload["video_id"] = video_id
         else:
             payload["query"] = query
-            
+
         req = urllib.request.Request(
             CLOUDFLARE_MUSIC_URL,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
             method="POST"
         )
-        
+
         try:
             response = await asyncio.to_thread(
                 lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
@@ -134,13 +197,13 @@ async def extract_audio(query):
             error_details = he.read().decode("utf-8")
             print(f"[CLOUDFLARE ERREUR DETEE] {error_details}", flush=True)
             raise Exception(f"Cloudflare : {error_details}")
-            
+
         res_data = json.loads(response)
         if "error" in res_data:
             raise Exception(res_data["error"])
-            
+
         return res_data
-        
+
     except Exception as e:
         print(f"[EXTRACTION ERREUR] {e}", flush=True)
         raise e
@@ -172,7 +235,7 @@ def play_next(guild):
         print(f"[PLAY ERREUR] {e}", flush=True)
 
 # ============================================================
-# Systeme de memoire IA
+# Systeme de memoire IA (mini-NGR)
 # ============================================================
 async def load_memory(user_id):
     try:
@@ -203,7 +266,7 @@ async def save_memory(user_id, memory_obj, message_id):
         print(f"[MEMOIRE] Erreur sauvegarde : {e}", flush=True)
 
 # ============================================================
-# Appel API Zhipu AI
+# Appel API Zhipu AI (mini-NGR)
 # ============================================================
 async def call_ai(user_id, username, question, memory_obj):
     import re
@@ -216,12 +279,22 @@ async def call_ai(user_id, username, question, memory_obj):
             memory_obj.setdefault("facts", []).append(new_fact)
 
     system_prompt = (
-        "Tu es un robot amical nommé Antigravity. Réponds de manière EXTRÊMEMENT concise et courte "
-        "(maximum 1 ou 2 phrases courtes, moins de 50 mots). Va droit au but, supprime les éléments non importants pour faire court."
+        "Tu es mini-NGR, le petit bot mascotte du serveur Discord THE NGR. "
+        "Tu parles comme un pote, de manière décontractée, drôle et directe. "
+        "Tu as le contrôle sur le lecteur de musique du serveur ! "
+        "Si l'utilisateur te demande de jouer une musique, passer (skip), mettre en pause ou arrêter, "
+        "ajoute impérativement l'une de ces balises à la toute fin de ta réponse (elle sera invisible pour lui) :\n"
+        "- [ACTION:PLAY:nom de la musique ou URL]\n"
+        "- [ACTION:SKIP]\n"
+        "- [ACTION:PAUSE]\n"
+        "- [ACTION:RESUME]\n"
+        "- [ACTION:STOP]\n"
+        "Exemple de réponse si on te demande de jouer Jul : 'Pas de soucis mon pote, je te lance ça direct ! [ACTION:PLAY:Jul Da]'\n"
+        "Réponds de manière TRÈS concise (1 à 2 phrases max, moins de 50 mots)."
     )
-    system_prompt += f"\nL'utilisateur actuel s'appelle {username} (ID: {user_id})."
+    system_prompt += f"\nTu parles avec {username} (ID: {user_id})."
     if memory_obj.get("facts"):
-        system_prompt += "\nVoici les informations mémorisées sur cet utilisateur :\n"
+        system_prompt += "\nCe que tu sais sur cette personne :\n"
         for fact in memory_obj["facts"]:
             system_prompt += f"- {fact}\n"
 
@@ -255,7 +328,7 @@ async def call_ai(user_id, username, question, memory_obj):
     try:
         ai_response = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError):
-        ai_response = "Désolé, je n'ai pas pu générer de réponse."
+        ai_response = "Oups, j'ai bugué là 😅"
 
     memory_obj.setdefault("history", []).append({"role": "user", "content": question})
     memory_obj["history"].append({"role": "assistant", "content": ai_response})
@@ -265,21 +338,141 @@ async def call_ai(user_id, username, question, memory_obj):
     return ai_response, is_learning
 
 # ============================================================
-# Evenements
+# Générateur et Gestionnaire du Rapport d'Activité Horaire
+# ============================================================
+async def process_hourly_summary():
+    global hourly_events
+    
+    # Vérifier s'il y a eu de l'activité
+    has_activity = (
+        len(hourly_events["games"]) > 0 or 
+        len(hourly_events["songs"]) > 0 or 
+        len(hourly_events["bot_songs"]) > 0 or 
+        len(hourly_events["chatters"]) > 0
+    )
+    
+    if not has_activity:
+        print("[HOURLY] Aucune activite durant l'heure passee. Annulation de l'appel API.", flush=True)
+        return
+
+    # Mettre en forme le résumé
+    lines = []
+    if hourly_events["chatters"]:
+        lines.append(f"Membres actifs dans le chat : {', '.join(hourly_events['chatters'])}")
+    if hourly_events["games"]:
+        lines.append(f"Activites et jeux : {', '.join(hourly_events['games'])}")
+    if hourly_events["songs"]:
+        lines.append(f"Musique ecoutee (Spotify) : {', '.join(hourly_events['songs'])}")
+    if hourly_events["bot_songs"]:
+        lines.append(f"Musique lances par le bot : {', '.join(hourly_events['bot_songs'])}")
+
+    summary_text = "\n".join(lines)
+    print(f"[HOURLY] Lancement de la synthese IA pour :\n{summary_text}", flush=True)
+
+    # Réinitialisation de la mémoire horaire
+    hourly_events = {
+        "games": set(),
+        "songs": set(),
+        "bot_songs": set(),
+        "chatters": set()
+    }
+
+    try:
+        system_prompt = (
+            "Tu es mini-NGR, le bot mascotte décontracté du serveur Discord THE NGR. "
+            "Voici la liste des activités que les membres ont faites durant l'heure passée. "
+            "Rédige un message en français à la fois drôle, amical et intelligent pour réagir "
+            "dans le salon des bots, charrier gentiment les membres (roast amical de gamer) "
+            "et demander des nouvelles. Reste TRÈS court et naturel (max 60 mots). "
+            "Utilise le tutoiement, le langage familier de pote et quelques émojis."
+        )
+
+        payload = json.dumps({
+            "model": "glm-4-flash",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Voici le résumé d'activité :\n{summary_text}"}
+            ],
+            "max_tokens": 150
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            ZHIPU_API_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {ZHIPU_API_KEY}"
+            },
+            method="POST"
+        )
+
+        response = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
+        )
+        data = json.loads(response)
+        ai_msg = data["choices"][0]["message"]["content"]
+
+        channel = bot.get_channel(MINI_NGR_CHANNEL_ID)
+        if channel:
+            await channel.send(f"👾 {ai_msg}")
+            
+    except Exception as e:
+        print(f"[HOURLY ERREUR] {e}", flush=True)
+
+async def hourly_loop():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        # Attendre 1 heure (3600 secondes)
+        await asyncio.sleep(3600)
+        await process_hourly_summary()
+
+# ============================================================
+# Evenements de Suivi d'Activite
 # ============================================================
 @bot.event
 async def on_ready():
     print(f"[OK] {bot.user} connecte — {len(bot.guilds)} serveur(s)", flush=True)
+    # Lancement de la boucle d'activite horaire en arriere-plan
+    bot.loop.create_task(hourly_loop())
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
+    
+    # Enregistrer l'activite de chat de l'utilisateur
+    hourly_events["chatters"].add(message.author.name)
+    
     print(f"[MSG] {message.author.name}: {message.content}", flush=True)
     await bot.process_commands(message)
 
 @bot.event
+async def on_presence_update(before, after):
+    if after.bot:
+        return
+        
+    # Parcourir les activites en cours de l'utilisateur
+    for act in after.activities:
+        # Pister les jeux
+        if act.type == discord.ActivityType.playing:
+            hourly_events["games"].add(f"{after.name} joue à {act.name}")
+        # Pister Spotify
+        elif act.type == discord.ActivityType.listening and act.name == "Spotify":
+            try:
+                title = getattr(act, "title", None)
+                artist = getattr(act, "artist", None)
+                if title and artist:
+                    hourly_events["songs"].add(f"{after.name} écoute {title} - {artist}")
+            except Exception:
+                pass
+
+@bot.event
 async def on_command_error(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        return
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Tu n'as pas la permission d'utiliser cette commande de contrôle.")
+        return
     print(f"[ERR] {ctx.command}: {error}", flush=True)
     await ctx.send(f"❌ Erreur : `{error}`")
 
@@ -298,7 +491,66 @@ async def on_voice_state_update(member, before, after):
                 await vc.disconnect()
 
 # ============================================================
-# Commande IA (!ask)
+# Fonction centrale d'execution de la Musique (Partagee)
+# ============================================================
+async def run_play(ctx, query):
+    if not ctx.author.voice:
+        return await ctx.send("❌ Rejoins un salon vocal d'abord !")
+    ch = ctx.author.voice.channel
+    try:
+        if ctx.voice_client is None:
+            await ch.connect()
+        elif ctx.voice_client.channel != ch:
+            await ctx.voice_client.move_to(ch)
+    except Exception as e:
+        return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
+
+    try:
+        song = await extract_audio(query)
+    except Exception as e:
+        return await ctx.send(f"❌ Impossible de charger : `{e}`")
+
+    gid = ctx.guild.id
+    q = get_queue(gid)
+    
+    hourly_events["bot_songs"].add(song['title'])
+
+    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+        q.append(song)
+        description = (
+            f"**[{song['title']}]({song['webpage_url']})**\n\n"
+            "ℹ️ *Tapez `!queue` pour voir la file d'attente.*"
+        )
+        embed = discord.Embed(title="📋 Ajouté à la file d'attente", description=description, color=0x57F287)
+        if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
+        embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+        embed.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
+        await ctx.send(embed=embed)
+    else:
+        now_playing[gid] = song
+        try:
+            src = discord.PCMVolumeTransformer(
+                discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
+                volume=get_vol(gid)
+            )
+            ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
+
+            desc_play = (
+                f"**[{song['title']}]({song['webpage_url']})**\n\n"
+                "**🎛️ Commandes :**\n"
+                "⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
+            )
+
+            embed = discord.Embed(title="🎵 En cours de lecture", description=desc_play, color=0x5865F2)
+            if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
+            embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+            embed.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
+            await ctx.send(embed=embed)
+        except Exception as e:
+            await ctx.send(f"❌ Erreur lecture : `{e}`")
+
+# ============================================================
+# Commande IA (!ask) — mini-NGR
 # ============================================================
 @bot.command(name="ask")
 async def ask(ctx, *, question: str):
@@ -311,79 +563,217 @@ async def ask(ctx, *, question: str):
             )
             await save_memory(ctx.author.id, memory_obj, memory_msg_id)
 
+            # Analyse des actions de contrôle de la musique générées par l'IA
+            action_match = re.search(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_response)
+            action_type = None
+            action_arg = ""
+            
+            if action_match:
+                action_type = action_match.group(1).upper()
+                action_arg = action_match.group(2) if action_match.group(2) else ""
+                # Nettoyer la balise d'action pour ne pas l'afficher à l'utilisateur
+                ai_response = re.sub(r"\[ACTION:.*?\]", "", ai_response).strip()
+
+            # Envoyer le texte de réponse du bot
             if is_learning:
-                await ctx.reply(f"📝 *C'est noté, je m'en souviendrai !*\n\n{ai_response}")
+                await ctx.reply(f"📝 *C'est noté frérot, je m'en souviendrai !*\n\n{ai_response}")
             else:
-                await ctx.reply(ai_response)
+                await ctx.reply(f"👾 {ai_response}")
+
+            # Exécuter l'action musicale s'il y en a une
+            if action_type:
+                await asyncio.sleep(0.5) # Léger délai naturel
+                if action_type == "PLAY" and action_arg:
+                    await run_play(ctx, action_arg)
+                elif action_type == "SKIP":
+                    if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+                        ctx.voice_client.stop()
+                        await ctx.send("⏭️ Musique passée par mini-NGR !")
+                elif action_type == "PAUSE":
+                    if ctx.voice_client and ctx.voice_client.is_playing():
+                        ctx.voice_client.pause()
+                        await ctx.send("⏸️ Musique mise en pause par mini-NGR.")
+                elif action_type == "RESUME":
+                    if ctx.voice_client and ctx.voice_client.is_paused():
+                        ctx.voice_client.resume()
+                        await ctx.send("▶️ Lecture reprise par mini-NGR.")
+                elif action_type == "STOP":
+                    if ctx.voice_client:
+                        get_queue(ctx.guild.id).clear()
+                        now_playing[ctx.guild.id] = None
+                        if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+                            ctx.voice_client.stop()
+                        await ctx.voice_client.disconnect()
+                        await ctx.send("🛑 Lecture arrêtée par mini-NGR.")
+
         except Exception as e:
             print(f"[ASK ERREUR] {e}", flush=True)
-            await ctx.send(f"❌ Erreur IA : `{e}`")
+            await ctx.send(f"❌ mini-NGR a bugué : `{e}`")
 
 # ============================================================
-# Commandes Musique
+# Commande de Déclenchement Manuel pour Tester l'Activite
+# ============================================================
+@bot.command(name="trigger_hourly")
+@commands.has_permissions(administrator=True)
+async def trigger_hourly(ctx):
+    await ctx.send("⚡ Lancement manuel de la synthèse d'activité...")
+    global hourly_events
+    
+    # Si aucune activite n'est enregistree, simuler une activite de test
+    if not (hourly_events["games"] or hourly_events["songs"] or hourly_events["bot_songs"] or hourly_events["chatters"]):
+        hourly_events["chatters"].add(ctx.author.name)
+        hourly_events["games"].add(f"{ctx.author.name} code sur son serveur")
+        
+    await process_hourly_summary()
+
+# ============================================================
+# Commandes d'Administration Utiles (Contrôle du serveur)
+# ============================================================
+@bot.command(name="clear", aliases=["purge"])
+@commands.has_permissions(manage_messages=True)
+async def clear_messages(ctx, limit: int):
+    """Supprime un nombre défini de messages dans le salon."""
+    await ctx.message.delete()
+    deleted = await ctx.channel.purge(limit=limit)
+    alert = await ctx.send(f"🧹 **{len(deleted)} messages** ont été supprimés par mini-NGR !")
+    await asyncio.sleep(4)
+    await alert.delete()
+
+@bot.command(name="vmove")
+@commands.has_permissions(move_members=True)
+async def voice_move(ctx, member: discord.Member, *, channel_name: str):
+    """Déplace un membre vers un autre salon vocal."""
+    target = discord.utils.get(ctx.guild.voice_channels, name=channel_name)
+    if not target:
+        target = next((c for c in ctx.guild.voice_channels if channel_name.lower() in c.name.lower()), None)
+        
+    if not target:
+        return await ctx.send("❌ Salon vocal introuvable.")
+        
+    if not member.voice:
+        return await ctx.send(f"❌ {member.mention} n'est connecté à aucun salon vocal.")
+        
+    await member.move_to(target)
+    await ctx.send(f"🚀 {member.mention} a été déplacé vers **{target.name}** !")
+
+@bot.command(name="vmute")
+@commands.has_permissions(mute_members=True)
+async def voice_mute(ctx, member: discord.Member):
+    """Mute un membre dans le salon vocal."""
+    if not member.voice:
+        return await ctx.send(f"❌ {member.mention} n'est pas en vocal.")
+    await member.edit(mute=True)
+    await ctx.send(f"🔇 {member.mention} a été réduit au silence par mini-NGR.")
+
+@bot.command(name="vunmute")
+@commands.has_permissions(mute_members=True)
+async def voice_unmute(ctx, member: discord.Member):
+    """Redonne la parole à un membre muté en vocal."""
+    if not member.voice:
+        return await ctx.send(f"❌ {member.mention} n'est pas en vocal.")
+    await member.edit(mute=False)
+    await ctx.send(f"🔊 {member.mention} peut à nouveau parler.")
+
+# ============================================================
+# Commandes Utilitaires & Jeux (Minuteur, Sondage, Profils)
+# ============================================================
+def parse_time(time_str):
+    match = re.match(r"^(\d+)([smh])$", time_str.lower())
+    if not match:
+        return None
+    val, unit = int(match.group(1)), match.group(2)
+    if unit == "s":
+        return val
+    elif unit == "m":
+        return val * 60
+    elif unit == "h":
+        return val * 3600
+    return None
+
+@bot.command(name="timer", aliases=["alarm", "remind"])
+async def start_timer(ctx, duration: str, *, reminder: str = "Le temps est écoulé !"):
+    """Lance un minuteur et ping l'utilisateur quand c'est fini."""
+    seconds = parse_time(duration)
+    if seconds is None:
+        return await ctx.send("❌ Format invalide. Exemple : `!timer 10s`, `!timer 5m`, `!timer 1h`.")
+        
+    await ctx.send(f"⏳ Minuteur lancé pour **{duration}** : *\"{reminder}\"*")
+    await asyncio.sleep(seconds)
+    await ctx.send(f"⏰ {ctx.author.mention} **Alarme !** {reminder}")
+
+@bot.command(name="poll")
+async def create_poll(ctx, *, args: str):
+    """Crée un sondage. Syntaxe : !poll Question | Option1 | Option2..."""
+    parts = [p.strip() for p in args.split("|")]
+    if len(parts) < 3:
+        return await ctx.send("❌ Syntaxe : `!poll Question | Choix 1 | Choix 2...` (2 choix minimum)")
+        
+    question = parts[0]
+    options = parts[1:10]  # Max 9 choix
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+    
+    desc = ""
+    for i, opt in enumerate(options):
+        desc += f"{emojis[i]} {opt}\n"
+        
+    embed = discord.Embed(title=f"📊 {question}", description=desc, color=0x5865F2)
+    embed.set_footer(text=f"Sondage créé par {ctx.author.name}")
+    poll_msg = await ctx.send(embed=embed)
+    
+    for i in range(len(options)):
+        await poll_msg.add_reaction(emojis[i])
+
+@bot.command(name="userinfo")
+async def user_info(ctx, member: discord.Member = None):
+    """Affiche les infos de profil d'un membre."""
+    member = member or ctx.author
+    embed = discord.Embed(title=f"👤 Profil de {member.name}", color=member.color)
+    embed.set_thumbnail(url=member.display_avatar.url)
+    
+    roles = [r.mention for r in member.roles[1:]]  # Exclure @everyone
+    roles_str = ", ".join(roles) if roles else "Aucun rôle"
+    
+    act = member.activity
+    act_str = f"{act.name}" if act else "Aucune activité en cours"
+    
+    embed.add_field(name="Pseudo", value=member.nick or "Aucun", inline=True)
+    embed.add_field(name="Statut", value=str(member.status).upper(), inline=True)
+    embed.add_field(name="Activité", value=act_str, inline=True)
+    embed.add_field(name="Création du compte", value=member.created_at.strftime("%d/%m/%Y"), inline=True)
+    embed.add_field(name="Rejoint le serveur", value=member.joined_at.strftime("%d/%m/%Y"), inline=True)
+    embed.add_field(name="Rôles", value=roles_str, inline=False)
+    
+    await ctx.send(embed=embed)
+
+@bot.command(name="serverinfo")
+async def server_info(ctx):
+    """Affiche les statistiques et infos du serveur."""
+    guild = ctx.guild
+    embed = discord.Embed(title=f"🏰 {guild.name}", color=0x5865F2)
+    if guild.icon:
+        embed.set_thumbnail(url=guild.icon.url)
+        
+    embed.add_field(name="Créateur", value=guild.owner.mention if guild.owner else "Inconnu", inline=True)
+    embed.add_field(name="Date de création", value=guild.created_at.strftime("%d/%m/%Y"), inline=True)
+    embed.add_field(name="Membres", value=str(guild.member_count), inline=True)
+    embed.add_field(name="Salons Textuels", value=str(len(guild.text_channels)), inline=True)
+    embed.add_field(name="Salons Vocaux", value=str(len(guild.voice_channels)), inline=True)
+    
+    await ctx.send(embed=embed)
+
+# ============================================================
+# Commandes Musique (Redirigées vers run_play)
 # ============================================================
 @bot.command(name="play", aliases=["p"])
 async def play(ctx, *, query: str):
-    if not ctx.author.voice:
-        return await ctx.send("❌ Rejoins un salon vocal d'abord !")
-    ch = ctx.author.voice.channel
-    try:
-        if ctx.voice_client is None:
-            await ch.connect()
-        elif ctx.voice_client.channel != ch:
-            await ctx.voice_client.move_to(ch)
-    except Exception as e:
-        return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
-
     async with ctx.typing():
-        try:
-            song = await extract_audio(query)
-        except Exception as e:
-            return await ctx.send(f"❌ Impossible de charger : `{e}`")
-
-        gid = ctx.guild.id
-        q = get_queue(gid)
-
-        if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-            q.append(song)
-            description = (
-                f"**[{song['title']}]({song['webpage_url']})**\n\n"
-                "ℹ️ *Astuce : tapez `!queue` pour voir les musiques à venir.*"
-            )
-            embed = discord.Embed(title="📋 Ajouté à la file d'attente", description=description, color=0x57F287)
-            if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-            embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-            embed.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
-            await ctx.send(embed=embed)
-        else:
-            now_playing[gid] = song
-            try:
-                src = discord.PCMVolumeTransformer(
-                    discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
-                    volume=get_vol(gid)
-                )
-                ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
-                
-                # Description enrichie avec la liste des commandes utilisables en direct
-                desc_play = (
-                    f"**[{song['title']}]({song['webpage_url']})**\n\n"
-                    "**🎛️ Commandes de contrôle :**\n"
-                    "⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
-                )
-                
-                embed = discord.Embed(title="🎵 En cours de lecture", description=desc_play, color=0x5865F2)
-                if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-                embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-                embed.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
-                await ctx.send(embed=embed)
-            except Exception as e:
-                await ctx.send(f"❌ Erreur lecture : `{e}`")
+        await run_play(ctx, query)
 
 @bot.command(name="pause")
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸️ Musique mise en pause. Tapez `!resume` pour reprendre.")
+        await ctx.send("⏸️ Musique en pause. Tapez `!resume` pour reprendre.")
 
 @bot.command(name="resume")
 async def resume(ctx):
@@ -429,11 +819,12 @@ async def volume(ctx, level: int):
     if not ctx.voice_client:
         return await ctx.send("❌ Le bot n'est pas connecté.")
     if not (0 <= level <= 100):
-        return await ctx.send("❌ Le volume doit être réglé entre 0 et 100.")
+        return await ctx.send("❌ Le volume doit être entre 0 et 100.")
     v = level / 100
     volumes[ctx.guild.id] = v
     if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
         ctx.voice_client.source.volume = v
-    await ctx.send(f"🔊 Le volume a été réglé à **{level}%**.")
+    await ctx.send(f"🔊 Volume : **{level}%**")
 
 bot.run(TOKEN)
+```
