@@ -8,10 +8,13 @@ import collections
 import datetime
 import traceback
 import threading
+import urllib.request
+import urllib.parse
+import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================================
-# Serveur web minimal pour Render (Port 10000)
+# Serveur web minimal pour Render
 # ============================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -33,16 +36,16 @@ print(f"[BOOT] Serveur web active sur le port {port}", flush=True)
 # Configuration du Bot
 # ============================================================
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+CLOUDFLARE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
+
 if not TOKEN:
-    print("[ERREUR CRITIQUE] Le token DISCORD_BOT_TOKEN est introuvable !", flush=True)
-    sys.exit(1)
+    sys.exit("[ERREUR] DISCORD_BOT_TOKEN manquant")
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.guilds = True
 
-# Prefix classique '!'
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
@@ -53,7 +56,6 @@ YTDL_OPTS = {
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
-    'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
     'nocheckcertificate': True,
     'geo_bypass': True,
@@ -85,25 +87,61 @@ def get_vol(gid):
     return volumes.get(gid, 0.5)
 
 # ============================================================
-# Fonctions utilitaires
+# Recherche via Piped API (proxy YouTube public, jamais bloque)
+# ============================================================
+PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.adminforge.de",
+    "https://api.piped.yt",
+]
+
+async def search_piped(query):
+    """Cherche une video YouTube via Piped API (proxy public)."""
+    print(f"[PIPED] Recherche : '{query}'", flush=True)
+    encoded = urllib.parse.quote(query)
+    
+    for instance in PIPED_INSTANCES:
+        try:
+            url = f"{instance}/search?q={encoded}&filter=music_songs"
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "DiscordBot (Antigravity, 1.0)"
+            })
+            data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=5).read().decode("utf-8"))
+            results = json.loads(data)
+            
+            items = results.get("items", [])
+            if items:
+                video = items[0]
+                video_url = f"https://www.youtube.com{video.get('url', '')}"
+                print(f"[PIPED] Trouve : {video.get('title')} -> {video_url}", flush=True)
+                return video_url
+        except Exception as e:
+            print(f"[PIPED] Instance {instance} echouee : {e}", flush=True)
+            continue
+    
+    return None
+
+# ============================================================
+# Extraction audio (avec recherche Piped)
 # ============================================================
 async def extract_audio(query):
     print(f"[YTDL] Extraction : '{query}'", flush=True)
     try:
         is_url = query.startswith(('http://', 'https://'))
         
-        if is_url:
-            # Lien direct (YouTube, SoundCloud, etc.)
-            search = query
-        else:
-            # Recherche par nom : SoundCloud (jamais bloque sur Render)
-            search = f"scsearch:{query}"
+        if not is_url:
+            # Recherche via Piped API (proxy YouTube)
+            found_url = await search_piped(query)
+            if not found_url:
+                raise Exception("Aucun resultat trouve. Essayez avec un lien YouTube direct.")
+            query = found_url
         
-        data = await asyncio.to_thread(lambda: ytdl.extract_info(search, download=False))
+        # Extraction audio via yt-dlp (lien direct uniquement)
+        data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
         
         if 'entries' in data:
             if not data['entries']:
-                raise Exception("Aucun resultat trouve pour cette recherche.")
+                raise Exception("Aucun resultat dans l'extraction.")
             data = data['entries'][0]
         
         if not data.get('url'):
@@ -117,11 +155,10 @@ async def extract_audio(query):
             'duration': data.get('duration', 0),
             'uploader': data.get('uploader', 'Inconnu'),
         }
-        print(f"[YTDL] Extraction reussie : {info['title']}", flush=True)
+        print(f"[YTDL] OK : {info['title']}", flush=True)
         return info
     except Exception as e:
         print(f"[YTDL ERREUR] {e}", flush=True)
-        traceback.print_exc()
         raise e
 
 def fmt_dur(s):
@@ -133,15 +170,11 @@ def play_next(guild):
     q = get_queue(guild.id)
     vc = guild.voice_client
     if not vc or not vc.is_connected():
-        print(f"[PLAY] Bot non connecte, arret de la boucle.", flush=True)
         return
-    
     if not q:
         now_playing[guild.id] = None
-        print(f"[PLAY] File d'attente vide. Deconnexion automatique du vocal...", flush=True)
         asyncio.run_coroutine_threadsafe(vc.disconnect(), bot.loop)
         return
-        
     song = q.popleft()
     now_playing[guild.id] = song
     try:
@@ -150,30 +183,28 @@ def play_next(guild):
             volume=get_vol(guild.id)
         )
         vc.play(src, after=lambda e: play_next(guild))
-        print(f"[PLAY] En cours de lecture : {song['title']}", flush=True)
+        print(f"[PLAY] {song['title']}", flush=True)
     except Exception as e:
-        print(f"[PLAY ERREUR] Erreur de lecture : {e}", flush=True)
-        traceback.print_exc()
+        print(f"[PLAY ERREUR] {e}", flush=True)
 
 # ============================================================
-# Evenements du Bot
+# Evenements
 # ============================================================
 @bot.event
 async def on_ready():
-    print(f"[OK] Bot pret et connecte en tant que : {bot.user}", flush=True)
-    print(f"[INFO] Connecte a {len(bot.guilds)} serveurs.", flush=True)
+    print(f"[OK] {bot.user} connecte — {len(bot.guilds)} serveur(s)", flush=True)
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    print(f"[MESSAGE REÇU] De '{message.author.name}' dans #{message.channel.name} : '{message.content}'", flush=True)
+    print(f"[MSG] {message.author.name}: {message.content}", flush=True)
     await bot.process_commands(message)
 
 @bot.event
 async def on_command_error(ctx, error):
-    print(f"[ERREUR COMMANDE] {ctx.command} : {error}", flush=True)
-    await ctx.send(f"❌ Une erreur est survenue : `{error}`")
+    print(f"[ERR] {ctx.command}: {error}", flush=True)
+    await ctx.send(f"❌ Erreur : `{error}`")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -182,58 +213,73 @@ async def on_voice_state_update(member, before, after):
     if before.channel:
         vc = before.channel.guild.voice_client
         if vc and vc.channel == before.channel:
-            # Si plus aucun humain n'est present dans le salon
             if all(m.bot for m in before.channel.members):
                 get_queue(before.channel.guild.id).clear()
                 now_playing[before.channel.guild.id] = None
                 if vc.is_playing():
                     vc.stop()
                 await vc.disconnect()
-                print("[AUTO] Salon vide, deconnexion automatique effectuee.", flush=True)
+                print("[AUTO] Salon vide — deconnexion", flush=True)
 
 # ============================================================
-# Commandes textuelles prefixe '!'
+# Commande IA (!ask)
+# ============================================================
+@bot.command(name="ask")
+async def ask(ctx, *, question: str):
+    print(f"[ASK] {ctx.author.name}: '{question}'", flush=True)
+    async with ctx.typing():
+        try:
+            payload = json.dumps({
+                "user_id": str(ctx.author.id),
+                "username": ctx.author.name,
+                "question": question
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                CLOUDFLARE_URL,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            response = await asyncio.to_thread(
+                lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
+            )
+            ai_response = json.loads(response).get("response", "Désolé, pas de réponse.")
+            await ctx.reply(ai_response)
+        except Exception as e:
+            print(f"[ASK ERREUR] {e}", flush=True)
+            await ctx.send(f"❌ Erreur IA : `{e}`")
+
+# ============================================================
+# Commandes Musique
 # ============================================================
 @bot.command(name="play", aliases=["p"])
 async def play(ctx, *, query: str):
-    print(f"[COMMANDE] !play recue de {ctx.author.name} avec la requete : '{query}'", flush=True)
-    
     if not ctx.author.voice:
-        print("[COMMANDE] Annulation : l'auteur n'est pas en vocal.", flush=True)
-        return await ctx.send("❌ Tu dois d'abord rejoindre un salon vocal !")
-
+        return await ctx.send("❌ Rejoins un salon vocal d'abord !")
     ch = ctx.author.voice.channel
-
-    # Connexion ou deplacement
     try:
         if ctx.voice_client is None:
-            print(f"[COMMANDE] Connexion au salon vocal : {ch.name}", flush=True)
             await ch.connect()
         elif ctx.voice_client.channel != ch:
-            print(f"[COMMANDE] Deplacement vers le salon vocal : {ch.name}", flush=True)
             await ctx.voice_client.move_to(ch)
     except Exception as e:
-        print(f"[COMMANDE ERREUR] Echec de la connexion vocale : {e}", flush=True)
-        return await ctx.send(f"❌ Erreur de connexion vocale : `{e}`")
+        return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
 
-    # Indicateur d'ecriture
     async with ctx.typing():
         try:
             song = await extract_audio(query)
         except Exception as e:
-            return await ctx.send(f"❌ Impossible de charger cette musique : `{e}`")
+            return await ctx.send(f"❌ Impossible de charger : `{e}`")
 
         gid = ctx.guild.id
         q = get_queue(gid)
 
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
             q.append(song)
-            print(f"[COMMANDE] Musique ajoutee a la file (Position #{len(q)})", flush=True)
-            
             embed = discord.Embed(title="📋 Ajouté à la file", description=f"**[{song['title']}]({song['webpage_url']})**", color=0x57F287)
             if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-            embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-            embed.add_field(name="🎤 Artiste", value=song['uploader'], inline=True)
+            embed.add_field(name="⏱️", value=fmt_dur(song['duration']), inline=True)
+            embed.add_field(name="📍", value=f"#{len(q)}", inline=True)
             await ctx.send(embed=embed)
         else:
             now_playing[gid] = song
@@ -243,62 +289,50 @@ async def play(ctx, *, query: str):
                     volume=get_vol(gid)
                 )
                 ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
-                print(f"[COMMANDE] Lancement direct de la lecture : {song['title']}", flush=True)
-                
                 embed = discord.Embed(title="🎵 En cours de lecture", description=f"**[{song['title']}]({song['webpage_url']})**", color=0x5865F2)
                 if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-                embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-                embed.add_field(name="🎤 Artiste", value=song['uploader'], inline=True)
+                embed.add_field(name="⏱️", value=fmt_dur(song['duration']), inline=True)
+                embed.add_field(name="🎤", value=song['uploader'], inline=True)
                 await ctx.send(embed=embed)
             except Exception as e:
-                print(f"[COMMANDE ERREUR] Echec lors du lancement audio : {e}", flush=True)
-                traceback.print_exc()
-                await ctx.send(f"❌ Erreur lors du lancement de la musique : `{e}`")
+                await ctx.send(f"❌ Erreur lecture : `{e}`")
 
 @bot.command(name="pause")
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        await ctx.send("⏸️ Musique mise en pause.")
-    else:
-        await ctx.send("❌ Rien ne joue actuellement.")
+        await ctx.send("⏸️ Pause.")
 
 @bot.command(name="resume")
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
-        await ctx.send("▶️ Lecture reprise.")
-    else:
-        await ctx.send("❌ La musique n'est pas en pause.")
+        await ctx.send("▶️ Reprise.")
 
 @bot.command(name="skip", aliases=["s"])
 async def skip(ctx):
     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
         ctx.voice_client.stop()
-        await ctx.send("⏭️ Musique passée.")
-    else:
-        await ctx.send("❌ Aucune musique en cours.")
+        await ctx.send("⏭️ Passée.")
 
 @bot.command(name="stop")
 async def stop(ctx):
     if not ctx.voice_client:
-        return await ctx.send("❌ Le bot n'est pas connecté.")
+        return await ctx.send("❌ Bot non connecté.")
     get_queue(ctx.guild.id).clear()
     now_playing[ctx.guild.id] = None
     if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
         ctx.voice_client.stop()
     await ctx.voice_client.disconnect()
-    await ctx.send("🛑 Musique arrêtée et bot déconnecté.")
+    await ctx.send("🛑 Arrêté.")
 
 @bot.command(name="queue", aliases=["q"])
 async def queue_info(ctx):
     gid = ctx.guild.id
     q = get_queue(gid)
     cur = now_playing.get(gid)
-
     if not cur and not q:
-        return await ctx.send("📋 La file d'attente est vide.")
-
+        return await ctx.send("📋 File vide.")
     e = discord.Embed(title="📋 File d'attente", color=0x5865F2)
     if cur:
         e.add_field(name="🎵 En cours", value=f"**{cur['title']}** — {fmt_dur(cur['duration'])}", inline=False)
@@ -311,15 +345,13 @@ async def queue_info(ctx):
 @bot.command(name="volume", aliases=["vol"])
 async def volume(ctx, level: int):
     if not ctx.voice_client:
-        return await ctx.send("❌ Le bot n'est pas connecté en vocal.")
+        return await ctx.send("❌ Bot non connecté.")
     if not (0 <= level <= 100):
-        return await ctx.send("❌ Le volume doit être entre 0 et 100.")
-    
+        return await ctx.send("❌ Volume entre 0 et 100.")
     v = level / 100
     volumes[ctx.guild.id] = v
     if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
         ctx.voice_client.source.volume = v
-    await ctx.send(f"🔊 Volume réglé à **{level}%**")
+    await ctx.send(f"🔊 Volume : **{level}%**")
 
-# Lancement du bot
 bot.run(TOKEN)
