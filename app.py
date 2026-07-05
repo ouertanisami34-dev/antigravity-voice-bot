@@ -243,10 +243,30 @@ def _make_song(d):
             'webpage_url': d.get('webpage_url', ''), 'thumbnail': d.get('thumbnail', ''),
             'duration': d.get('duration', 0), 'uploader': d.get('uploader', '?')}
 
+async def fetch_youtube_oembed(vid):
+    """
+    Fetches clean metadata (title, uploader, thumbnail) from YouTube's public oEmbed API.
+    This endpoint is lightweight, fast, and never blocked by bot detection.
+    """
+    try:
+        url = f"https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D{vid}&format=json"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        res = json.loads(await asyncio.to_thread(
+            lambda: urllib.request.urlopen(req, timeout=5).read().decode('utf-8')))
+        return {
+            'title': res.get('title', '?'),
+            'uploader': res.get('author_name', '?'),
+            'thumbnail': res.get('thumbnail_url', ''),
+            'webpage_url': f"https://www.youtube.com/watch?v={vid}"
+        }
+    except Exception as e:
+        print(f"[OEMBED ERR] {e}", flush=True)
+        return None
+
 async def extract(query):
     """
     2-step extraction:
-    1. Metadata (title, duration, thumbnail, uploader) via yt-dlp â€” always accurate
+    1. Metadata (title, duration, thumbnail, uploader) via yt-dlp/oEmbed â€” always accurate
     2. Stream URL via Cloudflare Worker â€” avoids YouTube bot detection
     Falls back to full yt-dlp stream URL if Worker fails.
     """
@@ -270,8 +290,21 @@ async def extract(query):
             vid = yt_id(meta.get('webpage_url', ''))
     except Exception as e:
         print(f"[META ERR] {e}", flush=True)
-        meta = {'title': query, 'url': '', 'webpage_url': '',
-                'thumbnail': '', 'duration': 0, 'uploader': '?'}
+        # SÃ‰CURITÃ‰ : RÃ©cupÃ©rer via oEmbed si c'est une vidÃ©o YouTube
+        if vid:
+            oembed_data = await fetch_youtube_oembed(vid)
+            if oembed_data:
+                meta = {
+                    'title': oembed_data['title'],
+                    'url': '',
+                    'webpage_url': oembed_data['webpage_url'],
+                    'thumbnail': oembed_data['thumbnail'],
+                    'duration': 0,
+                    'uploader': oembed_data['uploader']
+                }
+        if not meta:
+            meta = {'title': query, 'url': '', 'webpage_url': '',
+                    'thumbnail': '', 'duration': 0, 'uploader': '?'}
 
     # â”€â”€ Ã‰tape 2 : URL de stream via Worker Cloudflare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
@@ -298,6 +331,18 @@ async def extract(query):
         if not meta.get('thumbnail'):
             meta['thumbnail'] = res.get('thumbnail', '')
             
+        # Si le titre est toujours "Musique YouTube" ou une URL brute, forcer oEmbed
+        target_vid = vid or yt_id(meta.get('webpage_url', '')) or yt_id(res.get('webpage_url', ''))
+        if target_vid and (meta['title'] == "Musique YouTube" or is_url(meta['title']) or meta['uploader'] == "YouTube"):
+            oembed_data = await fetch_youtube_oembed(target_vid)
+            if oembed_data:
+                meta['title'] = oembed_data['title']
+                meta['uploader'] = oembed_data['uploader']
+                if oembed_data['thumbnail']:
+                    meta['thumbnail'] = oembed_data['thumbnail']
+                if not meta.get('webpage_url'):
+                    meta['webpage_url'] = oembed_data['webpage_url']
+
         return meta
     except Exception as e:
         print(f"[STREAM ERR] Worker echoue: {e}", flush=True)
@@ -305,11 +350,6 @@ async def extract(query):
         if meta.get('url'):
             print("[STREAM] Utilisation de l'URL yt-dlp en fallback", flush=True)
             return meta
-        raise Exception(f"Impossible d'extraire l'audio: {e}")
-
-
-# \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-# Moteur audio
 # \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 def next_sync(guild):
     asyncio.run_coroutine_threadsafe(play_next(guild), bot.loop)
