@@ -21,7 +21,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Antigravity Music Bot Active")
+        self.wfile.write(b"Antigravity OK")
     def log_message(self, format, *args):
         pass
 
@@ -30,16 +30,18 @@ threading.Thread(
     target=lambda: HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever(),
     daemon=True
 ).start()
-print(f"[BOOT] Serveur web active sur le port {port}", flush=True)
+print(f"[BOOT] Serveur web sur le port {port}", flush=True)
 
 # ============================================================
-# Configuration du Bot
+# Configuration
 # ============================================================
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-CLOUDFLARE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
-
 if not TOKEN:
     sys.exit("[ERREUR] DISCORD_BOT_TOKEN manquant")
+
+ZHIPU_API_KEY = "d67596b18ee34cf0b4bdc4b67d2d6cca.3GvLAH1h06OzPXiR"
+ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+MEMORY_CHANNEL_ID = 1523012733975658637
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -49,7 +51,7 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
-# Configuration YTDL & FFmpeg
+# YTDL & FFmpeg
 # ============================================================
 YTDL_OPTS = {
     'format': 'bestaudio/best',
@@ -65,7 +67,7 @@ YTDL_OPTS = {
         }
     },
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
     },
 }
 
@@ -75,7 +77,6 @@ FFMPEG_OPTS = {
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTS)
-
 queues = {}
 now_playing = {}
 volumes = {}
@@ -87,7 +88,7 @@ def get_vol(gid):
     return volumes.get(gid, 0.5)
 
 # ============================================================
-# Recherche via Piped API (proxy YouTube public, jamais bloque)
+# Recherche Piped (proxy YouTube)
 # ============================================================
 PIPED_INSTANCES = [
     "https://pipedapi.kavin.rocks",
@@ -96,57 +97,42 @@ PIPED_INSTANCES = [
 ]
 
 async def search_piped(query):
-    """Cherche une video YouTube via Piped API (proxy public)."""
-    print(f"[PIPED] Recherche : '{query}'", flush=True)
     encoded = urllib.parse.quote(query)
-    
     for instance in PIPED_INSTANCES:
         try:
             url = f"{instance}/search?q={encoded}&filter=music_songs"
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "DiscordBot (Antigravity, 1.0)"
-            })
+            req = urllib.request.Request(url, headers={"User-Agent": "DiscordBot (Antigravity, 1.0)"})
             data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=5).read().decode("utf-8"))
-            results = json.loads(data)
-            
-            items = results.get("items", [])
+            items = json.loads(data).get("items", [])
             if items:
-                video = items[0]
-                video_url = f"https://www.youtube.com{video.get('url', '')}"
-                print(f"[PIPED] Trouve : {video.get('title')} -> {video_url}", flush=True)
+                video_url = f"https://www.youtube.com{items[0].get('url', '')}"
+                print(f"[PIPED] Trouve : {items[0].get('title')} -> {video_url}", flush=True)
                 return video_url
         except Exception as e:
-            print(f"[PIPED] Instance {instance} echouee : {e}", flush=True)
+            print(f"[PIPED] {instance} echoue : {e}", flush=True)
             continue
-    
     return None
 
 # ============================================================
-# Extraction audio (avec recherche Piped)
+# Extraction audio
 # ============================================================
 async def extract_audio(query):
     print(f"[YTDL] Extraction : '{query}'", flush=True)
     try:
-        is_url = query.startswith(('http://', 'https://'))
-        
-        if not is_url:
-            # Recherche via Piped API (proxy YouTube)
+        if not query.startswith(('http://', 'https://')):
             found_url = await search_piped(query)
             if not found_url:
-                raise Exception("Aucun resultat trouve. Essayez avec un lien YouTube direct.")
+                raise Exception("Aucun resultat. Essayez avec un lien YouTube.")
             query = found_url
-        
-        # Extraction audio via yt-dlp (lien direct uniquement)
+
         data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
-        
         if 'entries' in data:
             if not data['entries']:
-                raise Exception("Aucun resultat dans l'extraction.")
+                raise Exception("Aucun resultat.")
             data = data['entries'][0]
-        
         if not data.get('url'):
-            raise Exception("Pas d'URL audio trouvee.")
-        
+            raise Exception("Pas d'URL audio.")
+
         info = {
             'title': data.get('title', 'Inconnu'),
             'url': data.get('url'),
@@ -188,6 +174,99 @@ def play_next(guild):
         print(f"[PLAY ERREUR] {e}", flush=True)
 
 # ============================================================
+# Systeme de memoire IA (via salon Discord)
+# ============================================================
+async def load_memory(user_id):
+    try:
+        channel = bot.get_channel(MEMORY_CHANNEL_ID)
+        if not channel:
+            channel = await bot.fetch_channel(MEMORY_CHANNEL_ID)
+        prefix = f"MEMORY_FOR_{user_id}"
+        async for message in channel.history(limit=100):
+            if message.content.startswith(prefix):
+                json_text = message.content[len(prefix):].strip()
+                return json.loads(json_text), message.id
+    except Exception as e:
+        print(f"[MEMOIRE] Erreur lecture : {e}", flush=True)
+    return {"user_id": str(user_id), "facts": [], "history": []}, None
+
+async def save_memory(user_id, memory_obj, message_id):
+    try:
+        channel = bot.get_channel(MEMORY_CHANNEL_ID)
+        if not channel:
+            channel = await bot.fetch_channel(MEMORY_CHANNEL_ID)
+        content = f"MEMORY_FOR_{user_id}\n{json.dumps(memory_obj)}"
+        if message_id:
+            msg = await channel.fetch_message(message_id)
+            await msg.edit(content=content)
+        else:
+            await channel.send(content=content)
+    except Exception as e:
+        print(f"[MEMOIRE] Erreur sauvegarde : {e}", flush=True)
+
+# ============================================================
+# Appel API Zhipu AI (glm-4-flash)
+# ============================================================
+async def call_ai(user_id, username, question, memory_obj):
+    # Detection apprentissage
+    import re
+    learn_match = re.search(r'(?:souviens-toi|retiens)\s+que\s+(.+)', question, re.IGNORECASE)
+    is_learning = False
+    if learn_match:
+        is_learning = True
+        new_fact = learn_match.group(1).strip()
+        if new_fact not in memory_obj.get("facts", []):
+            memory_obj.setdefault("facts", []).append(new_fact)
+
+    # Prompt systeme
+    system_prompt = "Tu es un robot amical nommé Antigravity intégré dans un serveur Discord en français. Réponds de manière concise (1 ou 2 phrases courtes si possible), naturelle et chaleureuse. N'hésite pas à utiliser quelques émojis."
+    system_prompt += f"\nL'utilisateur actuel s'appelle {username} (ID: {user_id})."
+    if memory_obj.get("facts"):
+        system_prompt += "\nVoici les informations mémorisées sur cet utilisateur :\n"
+        for fact in memory_obj["facts"]:
+            system_prompt += f"- {fact}\n"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    history = memory_obj.get("history", [])
+    for msg in history[-6:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": question})
+
+    # Appel API
+    payload = json.dumps({
+        "model": "glm-4-flash",
+        "messages": messages
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        ZHIPU_API_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {ZHIPU_API_KEY}"
+        },
+        method="POST"
+    )
+
+    response = await asyncio.to_thread(
+        lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
+    )
+    data = json.loads(response)
+
+    try:
+        ai_response = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        ai_response = "Désolé, je n'ai pas pu générer de réponse."
+
+    # Sauvegarder historique
+    memory_obj.setdefault("history", []).append({"role": "user", "content": question})
+    memory_obj["history"].append({"role": "assistant", "content": ai_response})
+    if len(memory_obj["history"]) > 10:
+        memory_obj["history"] = memory_obj["history"][-10:]
+
+    return ai_response, is_learning
+
+# ============================================================
 # Evenements
 # ============================================================
 @bot.event
@@ -222,31 +301,33 @@ async def on_voice_state_update(member, before, after):
                 print("[AUTO] Salon vide — deconnexion", flush=True)
 
 # ============================================================
-# Commande IA (!ask)
+# Commande IA (!ask) — 100% intégrée, sans Cloudflare
 # ============================================================
 @bot.command(name="ask")
 async def ask(ctx, *, question: str):
     print(f"[ASK] {ctx.author.name}: '{question}'", flush=True)
     async with ctx.typing():
         try:
-            payload = json.dumps({
-                "user_id": str(ctx.author.id),
-                "username": ctx.author.name,
-                "question": question
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                CLOUDFLARE_URL,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST"
+            # Charger la memoire de l'utilisateur
+            memory_obj, memory_msg_id = await load_memory(ctx.author.id)
+
+            # Appeler l'IA
+            ai_response, is_learning = await call_ai(
+                str(ctx.author.id), ctx.author.name, question, memory_obj
             )
-            response = await asyncio.to_thread(
-                lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
-            )
-            ai_response = json.loads(response).get("response", "Désolé, pas de réponse.")
-            await ctx.reply(ai_response)
+
+            # Sauvegarder la memoire
+            await save_memory(ctx.author.id, memory_obj, memory_msg_id)
+
+            # Repondre
+            if is_learning:
+                await ctx.reply(f"📝 *C'est noté, je m'en souviendrai !*\n\n{ai_response}")
+            else:
+                await ctx.reply(ai_response)
+
         except Exception as e:
             print(f"[ASK ERREUR] {e}", flush=True)
+            traceback.print_exc()
             await ctx.send(f"❌ Erreur IA : `{e}`")
 
 # ============================================================
