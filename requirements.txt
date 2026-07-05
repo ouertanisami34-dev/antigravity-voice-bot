@@ -1,3 +1,4 @@
 py-cord[voice]>=2.6
 PyNaCl
 yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
+static-ffmpeg
