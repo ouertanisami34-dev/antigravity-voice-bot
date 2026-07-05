@@ -22,22 +22,17 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
         self.wfile.write(b"Antigravity OK")
-    def log_message(self, format, *args):
-        pass
+    def log_message(self, format, *args): pass
 
 port = int(os.environ.get("PORT", 10000))
-threading.Thread(
-    target=lambda: HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever(),
-    daemon=True
-).start()
+threading.Thread(target=lambda: HTTPServer(("0.0.0.0", port), HealthHandler).serve_forever(), daemon=True).start()
 print(f"[BOOT] Serveur web active sur le port {port}", flush=True)
 
 # ============================================================
 # Configuration
 # ============================================================
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-if not TOKEN:
-    sys.exit("[ERREUR] DISCORD_BOT_TOKEN manquant")
+if not TOKEN: sys.exit("[ERREUR] DISCORD_BOT_TOKEN manquant")
 
 ZHIPU_API_KEY = "d67596b18ee34cf0b4bdc4b67d2d6cca.3GvLAH1h06OzPXiR"
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
@@ -46,11 +41,9 @@ MEMORY_CHANNEL_ID = 1523012733975658637
 MUSIC_CHANNEL_ID = 1523144828341325905
 MINI_NGR_CHANNEL_ID = 1523147101670735972
 
-# Ponts Cloudflare
 CLOUDFLARE_VOICE_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/voice"
 CLOUDFLARE_MUSIC_URL = "https://icy-wind-36d1.gamxdmeta.workers.dev/music"
 
-# Activation de tous les intents indispensables pour pister l'activite
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
@@ -58,113 +51,49 @@ intents.guilds = True
 intents.presences = True
 intents.members = True
 
-# Charger tous les membres et presences au démarrage
 bot = commands.Bot(command_prefix="!", intents=intents, chunk_guilds_at_startup=True)
+hourly_events = {"games": set(), "songs": set(), "bot_songs": set(), "chatters": set()}
 
 # ============================================================
-# Base de donnees d'activite horaire en memoire
-# ============================================================
-hourly_events = {
-    "games": set(),
-    "songs": set(),
-    "bot_songs": set(),
-    "chatters": set()
-}
-
-# ============================================================
-# Sécurité : Vérifier si la question est bien liée à la musique
+# Sécurité : Vérifier si la question est liée à la musique
 # ============================================================
 def is_music_request(question):
     q = question.lower().strip()
-    
-    # Mots-clés indiquant une question sur les jeux ou une salutation simple (ne jamais lancer de musique)
-    neutral_keywords = [
-        "quel jeu", "à quoi je", "qui joue", "tu fais quoi", "bonjour", "salut", 
-        "ça va", "hello", "coucou", "qui est en ligne", "qu'est-ce que", "qui écoute"
-    ]
-    for kw in neutral_keywords:
-        if kw in q:
-            return False
-            
-    # Mots-clés de musique typiques
-    music_keywords = [
-        "joue", "mets", "met", "lance", "écoute", "chante", "musique", "son", 
-        "chanson", "play", "music", "song", "url", "youtube", "spotify"
-    ]
-    if any(kw in q for kw in music_keywords):
-        return True
-        
-    # Si le message est très court (max 4 mots, ex: "pnl da" ou "jul"), on accepte comme demande de musique
-    if len(q.split()) <= 4:
-        return True
-        
-    return False
+    neutral = ["quel jeu", "à quoi je", "qui joue", "tu fais quoi", "bonjour", "salut", "ça va", "hello", "coucou", "qui est en ligne"]
+    if any(kw in q for kw in neutral): return False
+    music = ["joue", "mets", "met", "lance", "écoute", "chante", "musique", "son", "chanson", "play", "music", "song"]
+    return any(kw in q for kw in music) or len(q.split()) <= 4
 
 # ============================================================
 # Modérateur de salons (Restriction des commandes)
 # ============================================================
 @bot.check
 async def check_command_channels(ctx):
-    music_commands = {
-        "play", "p", "pause", "resume", "skip", "s", "stop", 
-        "queue", "q", "volume", "vol", "clearqueue", "cq", "clean", "empty"
-    }
-    
-    # Déterminer le salon cible selon la commande
-    if ctx.command.name in music_commands:
-        target_channel = MUSIC_CHANNEL_ID
-    else:
-        # Toutes les autres commandes du bot vont dans mini-ngr
-        target_channel = MINI_NGR_CHANNEL_ID
-
-    if ctx.channel.id != target_channel:
-        try:
-            await ctx.message.delete()
-        except Exception:
-            pass
-        alert = await ctx.send(f"❌ {ctx.author.mention}, utilise le salon <#{target_channel}> pour cette commande !")
+    music_cmds = {"play", "p", "pause", "resume", "skip", "s", "stop", "queue", "q", "volume", "vol", "clearqueue", "cq", "clean", "empty"}
+    target = MUSIC_CHANNEL_ID if ctx.command.name in music_cmds else MINI_NGR_CHANNEL_ID
+    if ctx.channel.id != target:
+        try: await ctx.message.delete()
+        except: pass
+        alert = await ctx.send(f"❌ {ctx.author.mention}, utilise <#{target}> pour cette commande !")
         await asyncio.sleep(5)
-        try:
-            await alert.delete()
-        except Exception:
-            pass
+        try: await alert.delete()
+        except: pass
         return False
-
     return True
 
 # ============================================================
-# Configuration YTDL & FFmpeg (Fallback SoundCloud, etc.)
+# Configuration YTDL & FFmpeg
 # ============================================================
-YTDL_OPTS = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'source_address': '0.0.0.0',
-    'nocheckcertificate': True,
-    'geo_bypass': True,
-}
-
-FFMPEG_OPTS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn',
-}
-
+YTDL_OPTS = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True, 'no_warnings': True, 'source_address': '0.0.0.0', 'nocheckcertificate': True, 'geo_bypass': True}
+FFMPEG_OPTS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTS)
-queues = {}
-now_playing = {}
-volumes = {}
+queues, now_playing, volumes = {}, {}, {}
 
-def get_queue(gid):
-    return queues.setdefault(gid, collections.deque())
-
-def get_vol(gid):
-    return volumes.get(gid, 0.5)
-
+def get_queue(gid): return queues.setdefault(gid, collections.deque())
+def get_vol(gid): return volumes.get(gid, 0.5)
 def get_yt_video_id(url):
-    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/)|youtu\.be/)([^?&\s]+)'
-    match = re.search(pattern, url)
-    return match.group(1) if match else None
+    m = re.search(r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/)|youtu\.be/)([^?&\s]+)', url)
+    return m.group(1) if m else None
 
 # ============================================================
 # Extraction Audio via Cloudflare Worker Proxy
@@ -173,81 +102,33 @@ async def extract_audio(query):
     print(f"[EXTRACTION] Query : '{query}'", flush=True)
     try:
         video_id = get_yt_video_id(query)
-
         if not video_id and query.startswith(('http://', 'https://')):
-            print(f"[YTDL FALLBACK] Extraction standard pour : {query}", flush=True)
             data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
-            if 'entries' in data:
-                data = data['entries'][0]
-            return {
-                'title': data.get('title', 'Inconnu'),
-                'url': data.get('url'),
-                'webpage_url': data.get('webpage_url', ''),
-                'thumbnail': data.get('thumbnail', ''),
-                'duration': data.get('duration', 0),
-                'uploader': data.get('uploader', 'Inconnu'),
-            }
+            if 'entries' in data: data = data['entries'][0]
+            return {'title': data.get('title', 'Inconnu'), 'url': data.get('url'), 'webpage_url': data.get('webpage_url', ''), 'thumbnail': data.get('thumbnail', ''), 'duration': data.get('duration', 0), 'uploader': data.get('uploader', 'Inconnu')}
 
-        print(f"[CLOUDFLARE PROXY] Appel du pont /music pour YouTube", flush=True)
-        payload = {}
-        if video_id:
-            payload["video_id"] = video_id
-        else:
-            payload["query"] = query
-
-        req = urllib.request.Request(
-            CLOUDFLARE_MUSIC_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-            method="POST"
-        )
-
-        try:
-            response = await asyncio.to_thread(
-                lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
-            )
-        except urllib.error.HTTPError as he:
-            error_details = he.read().decode("utf-8")
-            print(f"[CLOUDFLARE ERREUR DETEE] {error_details}", flush=True)
-            raise Exception(f"Cloudflare : {error_details}")
-
+        req = urllib.request.Request(CLOUDFLARE_MUSIC_URL, data=json.dumps({"video_id": video_id} if video_id else {"query": query}).encode("utf-8"), headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}, method="POST")
+        response = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
         res_data = json.loads(response)
-        if "error" in res_data:
-            raise Exception(res_data["error"])
-
-        if not res_data.get("webpage_url") and video_id:
-            res_data["webpage_url"] = f"https://www.youtube.com/watch?v={video_id}"
-
+        if "error" in res_data: raise Exception(res_data["error"])
+        if not res_data.get("webpage_url") and video_id: res_data["webpage_url"] = f"https://www.youtube.com/watch?v={video_id}"
         return res_data
-
     except Exception as e:
         print(f"[EXTRACTION ERREUR] {e}", flush=True)
         raise e
 
-def fmt_dur(s):
-    if not s:
-        return "🔴 Live"
-    return str(datetime.timedelta(seconds=int(s)))
+def fmt_dur(s): return "🔴 Live" if not s else str(datetime.timedelta(seconds=int(s)))
 
-# ============================================================
-# Suivi du temps écoulé de la lecture
-# ============================================================
 def get_elapsed_time(song):
-    if not song or 'start_time' not in song:
-        return 0
-    if 'pause_start' in song:
-        elapsed = (song['pause_start'] - song['start_time']).total_seconds() - song.get('paused_duration', 0)
-    else:
-        elapsed = (datetime.datetime.now() - song['start_time']).total_seconds() - song.get('paused_duration', 0)
-    return max(0, int(elapsed))
+    if not song or 'start_time' not in song: return 0
+    ref = song['pause_start'] if 'pause_start' in song else datetime.datetime.now()
+    return max(0, int((ref - song['start_time']).total_seconds() - song.get('paused_duration', 0)))
 
 def make_progress_bar(elapsed, total):
-    if not total:
-        return "🔴 [▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬] Live"
+    if not total: return "🔴 [▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬] Live"
     length = 20
     percent = elapsed / total
-    filled = int(length * percent)
-    filled = max(0, min(length, filled))
+    filled = max(0, min(length, int(length * percent)))
     bar = "▬" * filled + "🔘" + "▬" * (length - filled - 1)
     return f"▶️ {bar} `[{fmt_dur(elapsed)} / {fmt_dur(total)}]`"
 
@@ -255,44 +136,31 @@ def make_progress_bar(elapsed, total):
 # Logique de file d'attente threadsafe asynchrone
 # ============================================================
 def play_next_threadsafe(guild):
-    coro = play_next_async(guild)
-    asyncio.run_coroutine_threadsafe(coro, bot.loop)
+    asyncio.run_coroutine_threadsafe(play_next_async(guild), bot.loop)
 
 async def play_next_async(guild):
     q = get_queue(guild.id)
     vc = guild.voice_client
-    if not vc or not vc.is_connected():
-        return
+    if not vc or not vc.is_connected(): return
     if not q:
         now_playing[guild.id] = None
         await vc.disconnect()
         return
-        
     song = q.popleft()
     now_playing[guild.id] = song
     try:
-        # Pause d'une demi-seconde pour laisser l'ancien lecteur se fermer proprement
         await asyncio.sleep(0.5)
-        
-        # RAFRAÎCHIR le lien de flux juste avant de jouer pour éviter l'expiration du lien Cobalt
-        print(f"[PLAY_NEXT] Rafraichissement du flux pour : '{song['title']}'", flush=True)
+        print(f"[PLAY_NEXT] Rafraichissement pour : '{song['title']}'", flush=True)
         try:
-            query_to_refresh = song.get('webpage_url') or song.get('original_query') or song['title']
-            fresh_song = await extract_audio(query_to_refresh)
-            stream_url = fresh_song['url']
-        except Exception as refresh_err:
-            print(f"[REFRESH ERREUR] Impossible de rafraichir, utilisation du lien stocke : {refresh_err}", flush=True)
+            fresh = await extract_audio(song.get('webpage_url') or song.get('original_query') or song['title'])
+            stream_url = fresh['url']
+        except Exception as re_err:
+            print(f"[REFRESH ERR] Utilisation backup : {re_err}", flush=True)
             stream_url = song['url']
         
-        src = discord.PCMVolumeTransformer(
-            discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTS),
-            volume=get_vol(guild.id)
-        )
-        
-        # Enregistrer le début de la lecture
+        src = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(stream_url, **FFMPEG_OPTS), volume=get_vol(guild.id))
         song['start_time'] = datetime.datetime.now()
         song['paused_duration'] = 0
-        
         vc.play(src, after=lambda e: play_next_threadsafe(guild))
         print(f"[PLAY] {song['title']}", flush=True)
     except Exception as e:
@@ -303,31 +171,23 @@ async def play_next_async(guild):
 # ============================================================
 async def load_memory(user_id):
     try:
-        channel = bot.get_channel(MEMORY_CHANNEL_ID)
-        if not channel:
-            channel = await bot.fetch_channel(MEMORY_CHANNEL_ID)
+        channel = bot.get_channel(MEMORY_CHANNEL_ID) or await bot.fetch_channel(MEMORY_CHANNEL_ID)
         prefix = f"MEMORY_FOR_{user_id}"
-        async for message in channel.history(limit=100):
-            if message.content.startswith(prefix):
-                json_text = message.content[len(prefix):].strip()
-                return json.loads(json_text), message.id
-    except Exception as e:
-        print(f"[MEMOIRE] Erreur lecture : {e}", flush=True)
+        async for msg in channel.history(limit=100):
+            if msg.content.startswith(prefix):
+                return json.loads(msg.content[len(prefix):].strip()), msg.id
+    except Exception as e: print(f"[MEMOIRE] Erreur lecture : {e}", flush=True)
     return {"user_id": str(user_id), "facts": [], "history": []}, None
 
 async def save_memory(user_id, memory_obj, message_id):
     try:
-        channel = bot.get_channel(MEMORY_CHANNEL_ID)
-        if not channel:
-            channel = await bot.fetch_channel(MEMORY_CHANNEL_ID)
+        channel = bot.get_channel(MEMORY_CHANNEL_ID) or await bot.fetch_channel(MEMORY_CHANNEL_ID)
         content = f"MEMORY_FOR_{user_id}\n{json.dumps(memory_obj)}"
         if message_id:
             msg = await channel.fetch_message(message_id)
             await msg.edit(content=content)
-        else:
-            await channel.send(content=content)
-    except Exception as e:
-        print(f"[MEMOIRE] Erreur sauvegarde : {e}", flush=True)
+        else: await channel.send(content=content)
+    except Exception as e: print(f"[MEMOIRE] Erreur sauvegarde : {e}", flush=True)
 
 # ============================================================
 # Appel API Zhipu AI (mini-NGR)
@@ -335,181 +195,82 @@ async def save_memory(user_id, memory_obj, message_id):
 async def call_ai(user_id, username, question, memory_obj):
     import re
     learn_match = re.search(r'(?:souviens-toi|retiens)\s+que\s+(.+)', question, re.IGNORECASE)
-    is_learning = False
     if learn_match:
-        is_learning = True
         new_fact = learn_match.group(1).strip()
-        if new_fact not in memory_obj.get("facts", []):
-            memory_obj.setdefault("facts", []).append(new_fact)
+        if new_fact not in memory_obj.get("facts", []): memory_obj.setdefault("facts", []).append(new_fact)
 
-    # Récupérer les activités et jeux en temps réel de tous les membres
     active_activities = []
     for guild in bot.guilds:
-        for member in guild.members:
-            if member.bot:
-                continue
-            for act in member.activities:
-                if act.type == discord.ActivityType.playing:
-                    active_activities.append(f"{member.name} joue à {act.name}")
+        for m in guild.members:
+            if m.bot: continue
+            for act in m.activities:
+                if act.type == discord.ActivityType.playing: active_activities.append(f"{m.name} joue à {act.name}")
                 elif act.type == discord.ActivityType.listening and act.name == "Spotify":
-                    try:
-                        title = getattr(act, "title", None)
-                        artist = getattr(act, "artist", None)
-                        if title and artist:
-                            active_activities.append(f"{member.name} écoute Spotify : {title} (par {artist})")
-                    except Exception:
-                        pass
+                    title = getattr(act, "title", None)
+                    artist = getattr(act, "artist", None)
+                    if title and artist: active_activities.append(f"{m.name} écoute Spotify : {title} (par {artist})")
 
     system_prompt = (
-        "Tu es mini-NGR, le petit bot mascotte du serveur Discord THE NGR. "
-        "Tu parles comme un pote, de manière décontractée, drôle et directe. "
-        "Tu as le contrôle sur le lecteur de musique du serveur ! "
-        "Uniquement si l'utilisateur te demande explicitement de contrôler la musique, "
-        "ajoute l'une de ces balises à la toute fin de ta réponse :\n"
-        "- [ACTION:PLAY:nom de la musique ou URL] (ajoute à la file d'attente s'il y a déjà du son)\n"
-        "- [ACTION:PLAY_NOW:nom de la musique ou URL] (si on te demande d'y jouer TOUT DE SUITE, MAINTENANT, ou EN PRIORITÉ, coupe la musique en cours pour lancer celle-ci directement)\n"
-        "- [ACTION:SKIP] (si on te demande de passer)\n"
-        "- [ACTION:PAUSE] (si on te demande de mettre en pause)\n"
-        "- [ACTION:RESUME] (si on te demande de reprendre)\n"
-        "- [ACTION:STOP] (si on te demande d'arrêter ou de déconnecter le bot)\n"
-        "- [ACTION:CLEARQUEUE] (si on te demande d'annuler la file d'attente, vider la liste ou nettoyer la suite)\n"
-        "- [ACTION:QUEUE] (si on te demande de montrer la file d'attente, voir la liste ou qu'est-ce qu'il y a après)\n\n"
-        "Tu peux enchaîner plusieurs balises de PLAY si l'utilisateur te demande plusieurs musiques d'un coup. "
-        "Si l'utilisateur te demande une liste de musiques ou de lancer un genre (ex: 'fais une liste de 10 fonk et lance-les 1 par 1'), "
-        "propose la liste en texte ET ajoute absolument toutes les balises [ACTION:PLAY:nom du morceau] correspondantes à la toute fin de ta réponse "
-        "pour que le bot les charge toutes d'un coup en arrière-plan !\n\n"
-        "IMPORTANT : Si l'utilisateur te dit bonjour, te parle normalement ou te pose une question générale, "
-        "réponds-lui simplement sans ajouter de balise [ACTION:...] à la fin.\n"
-        "Réponds de manière TRÈS concise (1 à 2 phrases max, moins de 50 mots)."
+        "Tu es mini-NGR, le bot mascotte du serveur Discord THE NGR. Tu parles comme un pote décontracté et direct.\n"
+        "Tu as le contrôle sur le lecteur de musique ! Si l'utilisateur te demande une action sur la musique, "
+        "ajoute impérativement l'une de ces balises à la toute fin (invisible pour lui) :\n"
+        "- [ACTION:PLAY:nom de la musique] (ajoute à la file d'attente)\n"
+        "- [ACTION:PLAY_NOW:nom de la musique] (si on demande TOUT DE SUITE, MAINTENANT ou EN PRIORITÉ, cela coupe le son actuel)\n"
+        "- [ACTION:SKIP] (passer la musique)\n"
+        "- [ACTION:PAUSE] (mettre en pause)\n"
+        "- [ACTION:RESUME] (reprendre la musique)\n"
+        "- [ACTION:STOP] (arrêter et déconnecter le bot)\n"
+        "- [ACTION:CLEARQUEUE] (vider la liste ou la file d'attente)\n"
+        "- [ACTION:QUEUE] (montrer la liste de lecture)\n\n"
+        "Tu peux enchaîner plusieurs balises de PLAY si on te demande plusieurs chansons d'un coup (ex: [ACTION:PLAY:Jul] [ACTION:PLAY:PNL]). "
+        "Si l'utilisateur te demande une liste ou un genre (ex: 'lance 10 fonk'), liste-les et mets ABSOLUMENT toutes les balises [ACTION:PLAY:...] correspondantes à la toute fin.\n\n"
+        "IMPORTANT : Si on te parle normalement ou dit bonjour, réponds simplement SANS balise [ACTION:...]. Réponds de manière très concise (max 2 phrases)."
     )
     system_prompt += f"\nTu parles avec {username} (ID: {user_id})."
     if memory_obj.get("facts"):
-        system_prompt += "\nCe que tu sais sur cette personne (ses goûts) :\n"
-        for fact in memory_obj["facts"]:
-            system_prompt += f"- {fact}\n"
-
+        system_prompt += "\nInfos sur lui :\n"
+        for fact in memory_obj["facts"]: system_prompt += f"- {fact}\n"
     if active_activities:
-        system_prompt += "\nActivité en temps réel des membres connectés actuellement :\n"
-        for act in active_activities:
-            system_prompt += f"- {act}\n"
+        system_prompt += "\nActivité en direct sur le serveur :\n"
+        for act in active_activities: system_prompt += f"- {act}\n"
 
     messages = [{"role": "system", "content": system_prompt}]
-    history = memory_obj.get("history", [])
-    for msg in history[-6:]:
-        messages.append({"role": msg["role"], "content": msg["content"]})
+    for msg in memory_obj.get("history", [])[-6:]: messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": question})
 
-    payload = json.dumps({
-        "model": "glm-4-flash",
-        "messages": messages,
-        "max_tokens": 300
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        ZHIPU_API_URL,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {ZHIPU_API_KEY}"
-        },
-        method="POST"
-    )
-
-    response = await asyncio.to_thread(
-        lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
-    )
+    payload = json.dumps({"model": "glm-4-flash", "messages": messages, "max_tokens": 250}).encode("utf-8")
+    req = urllib.request.Request(ZHIPU_API_URL, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {ZHIPU_API_KEY}"}, method="POST")
+    response = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
     data = json.loads(response)
-
-    try:
-        ai_response = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        ai_response = "Oups, j'ai bugué là 😅"
+    try: ai_response = data["choices"][0]["message"]["content"]
+    except: ai_response = "Oups, j'ai bugué là 😅"
 
     memory_obj.setdefault("history", []).append({"role": "user", "content": question})
     memory_obj["history"].append({"role": "assistant", "content": ai_response})
-    if len(memory_obj["history"]) > 10:
-        memory_obj["history"] = memory_obj["history"][-10:]
-
-    return ai_response, is_learning
+    if len(memory_obj["history"]) > 10: memory_obj["history"] = memory_obj["history"][-10:]
+    return ai_response, learn_match is not None
 
 # ============================================================
-# Générateur et Gestionnaire du Rapport d'Activité Horaire
+# Rapport d'Activité Horaire
 # ============================================================
 async def process_hourly_summary():
     global hourly_events
-    
-    # Vérifier s'il y a eu de l'activité
-    has_activity = (
-        len(hourly_events["games"]) > 0 or 
-        len(hourly_events["songs"]) > 0 or 
-        len(hourly_events["bot_songs"]) > 0 or 
-        len(hourly_events["chatters"]) > 0
-    )
-    
-    if not has_activity:
-        return
-
-    # Mettre en forme le résumé
+    if not (hourly_events["games"] or hourly_events["songs"] or hourly_events["bot_songs"] or hourly_events["chatters"]): return
     lines = []
-    if hourly_events["chatters"]:
-        lines.append(f"Membres actifs dans le chat : {', '.join(hourly_events['chatters'])}")
-    if hourly_events["games"]:
-        lines.append(f"Activites et jeux : {', '.join(hourly_events['games'])}")
-    if hourly_events["songs"]:
-        lines.append(f"Musique ecoutee (Spotify) : {', '.join(hourly_events['songs'])}")
-    if hourly_events["bot_songs"]:
-        lines.append(f"Musique lances par le bot : {', '.join(hourly_events['bot_songs'])}")
-
+    if hourly_events["chatters"]: lines.append(f"Membres actifs : {', '.join(hourly_events['chatters'])}")
+    if hourly_events["games"]: lines.append(f"Jeux : {', '.join(hourly_events['games'])}")
+    if hourly_events["songs"]: lines.append(f"Spotify : {', '.join(hourly_events['songs'])}")
+    if hourly_events["bot_songs"]: lines.append(f"Bot musique : {', '.join(hourly_events['bot_songs'])}")
     summary_text = "\n".join(lines)
-
-    # Réinitialisation de la mémoire horaire
-    hourly_events = {
-        "games": set(),
-        "songs": set(),
-        "bot_songs": set(),
-        "chatters": set()
-    }
-
+    hourly_events = {"games": set(), "songs": set(), "bot_songs": set(), "chatters": set()}
     try:
-        system_prompt = (
-            "Tu es mini-NGR, le bot mascotte décontracté du serveur Discord THE NGR. "
-            "Voici la liste des activités que les membres ont faites durant l'heure passée. "
-            "Rédige un message en français à la fois drôle, amical et intelligent pour réagir "
-            "dans le salon des bots, charrier gentiment les membres (roast amical de gamer) "
-            "et demander des nouvelles. Reste TRÈS court et naturel (max 60 mots)."
-        )
-
-        payload = json.dumps({
-            "model": "glm-4-flash",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Voici le résumé d'activité :\n{summary_text}"}
-            ],
-            "max_tokens": 150
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            ZHIPU_API_URL,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {ZHIPU_API_KEY}"
-            },
-            method="POST"
-        )
-
-        response = await asyncio.to_thread(
-            lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
-        )
-        data = json.loads(response)
-        ai_msg = data["choices"][0]["message"]["content"]
-
+        system = "Tu es mini-NGR, bot mascotte de THE NGR. Réagis de façon drôle et courte (max 50 mots) à l'activité passée."
+        payload = json.dumps({"model": "glm-4-flash", "messages": [{"role": "system", "content": system}, {"role": "user", "content": summary_text}], "max_tokens": 150}).encode("utf-8")
+        req = urllib.request.Request(ZHIPU_API_URL, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {ZHIPU_API_KEY}"}, method="POST")
+        res = await asyncio.to_thread(lambda: urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
         channel = bot.get_channel(MINI_NGR_CHANNEL_ID)
-        if channel:
-            await channel.send(f"👾 {ai_msg}")
-            
-    except Exception as e:
-        print(f"[HOURLY ERREUR] {e}", flush=True)
+        if channel: await channel.send(f"👾 {json.loads(res)['choices'][0]['message']['content']}")
+    except Exception as e: print(f"[HOURLY ERR] {e}", flush=True)
 
 async def hourly_loop():
     await bot.wait_until_ready()
@@ -522,175 +283,119 @@ async def hourly_loop():
 # ============================================================
 @bot.event
 async def on_ready():
-    print(f"[OK] {bot.user} connecte — {len(bot.guilds)} serveur(s)", flush=True)
+    print(f"[OK] {bot.user} connecte", flush=True)
     bot.loop.create_task(hourly_loop())
-    
-    # Forcer le chunking de tous les serveurs pour charger les presences des membres
-    for guild in bot.guilds:
-        try:
-            await guild.chunk()
-            print(f"[CHUNK] Serveur {guild.name} charge avec succes.", flush=True)
-        except Exception as e:
-            print(f"[CHUNK ERREUR] Impossible de charger {guild.name} : {e}", flush=True)
+    for g in bot.guilds:
+        try: await g.chunk()
+        except: pass
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
-    
-    # Enregistrer l'activite de chat de l'utilisateur dans l'historique de l'heure
+    if message.author.bot: return
     hourly_events["chatters"].add(message.author.name)
-    
-    # Si le message est dans #👾-mini-ngr et ne commence pas par !, l'IA repond en direct
     if message.channel.id == MINI_NGR_CHANNEL_ID and not message.content.startswith("!"):
-        ctx = await bot.get_context(message)
-        await run_ask(ctx, message.content)
+        await run_ask(await bot.get_context(message), message.content)
         return
-        
-    print(f"[MSG] {message.author.name}: {message.content}", flush=True)
     await bot.process_commands(message)
 
 @bot.event
 async def on_presence_update(before, after):
-    if after.bot:
-        return
-        
-    # Parcourir les activites en cours de l'utilisateur
+    if after.bot: return
     for act in after.activities:
-        if act.type == discord.ActivityType.playing:
-            hourly_events["games"].add(f"{after.name} joue à {act.name}")
+        if act.type == discord.ActivityType.playing: hourly_events["games"].add(f"{after.name} joue à {act.name}")
         elif act.type == discord.ActivityType.listening and act.name == "Spotify":
-            try:
-                title = getattr(act, "title", None)
-                artist = getattr(act, "artist", None)
-                if title and artist:
-                    hourly_events["songs"].add(f"{after.name} écoute {title} - {artist}")
-            except Exception:
-                pass
+            t, a = getattr(act, "title", None), getattr(act, "artist", None)
+            if t and a: hourly_events["songs"].add(f"{after.name} écoute {t} - {a}")
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CheckFailure):
-        return
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ Tu n'as pas la permission d'utiliser cette commande de contrôle.")
-        return
-    print(f"[ERR] {ctx.command}: {error}", flush=True)
+    if isinstance(error, (commands.CheckFailure, commands.MissingPermissions)): return
     await ctx.send(f"❌ Erreur : `{error}`")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    if member.bot:
-        return
+    if member.bot: return
     if before.channel:
         vc = before.channel.guild.voice_client
-        if vc and vc.channel == before.channel:
-            if all(m.bot for m in before.channel.members):
-                get_queue(before.channel.guild.id).clear()
-                now_playing[before.channel.guild.id] = None
-                if vc.is_playing():
-                    vc.stop()
-                await vc.disconnect()
+        if vc and vc.channel == before.channel and all(m.bot for m in before.channel.members):
+            get_queue(before.channel.guild.id).clear()
+            now_playing[before.channel.guild.id] = None
+            if vc.is_playing() or vc.is_paused(): vc.stop()
+            await vc.disconnect()
 
 # ============================================================
-# Fonction d'affichage de la file d'attente (Interface Premium)
+# Affichage de la file d'attente (Interface Premium)
 # ============================================================
 async def show_queue(ctx):
-    gid = ctx.guild.id
-    q = get_queue(gid)
-    cur = now_playing.get(gid)
-    
+    q = get_queue(ctx.guild.id)
+    cur = now_playing.get(ctx.guild.id)
     music_channel = bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel
-
-    if not cur and not q:
-        return await music_channel.send("📋 La file d'attente est vide.")
-        
+    if not cur and not q: return await music_channel.send("📋 La file d'attente est vide.")
     e = discord.Embed(title="🎼 FILE D'ATTENTE ACTUELLE", color=0x5865F2)
-    
     if cur:
-        elapsed = get_elapsed_time(cur)
-        progress = make_progress_bar(elapsed, cur.get('duration', 0))
-        e.add_field(
-            name="🎵 En cours de lecture", 
-            value=f"**[{cur['title']}]({cur['webpage_url']})**\n{progress}\n*Par : {cur['uploader']}*", 
-            inline=False
-        )
-        if cur.get('thumbnail'):
-            e.set_thumbnail(url=cur['thumbnail'])
-            
+        progress = make_progress_bar(get_elapsed_time(cur), cur.get('duration', 0))
+        e.add_field(name="🎵 En cours de lecture", value=f"**[{cur['title']}]({cur['webpage_url']})**\n{progress}\n*Par : {cur['uploader']}*", inline=False)
+        if cur.get('thumbnail'): e.set_thumbnail(url=cur['thumbnail'])
     if q:
-        lines = []
-        for i, s in enumerate(list(q)[:10], 1):
-            lines.append(f"`{i}.` ⏳ **[{s['title']}]({s['webpage_url']})** `[{fmt_dur(s['duration'])}]`")
-        if len(q) > 10:
-            lines.append(f"\n*... et {len(q) - 10} autre(s) musique(s)*")
-            
-        total_q_duration = sum(int(s.get('duration', 0)) for s in q)
+        lines = [f"`{i}.` ⏳ **[{s['title']}]({s['webpage_url']})** `[{fmt_dur(s['duration'])}]`" for i, s in enumerate(list(q)[:10], 1)]
+        if len(q) > 10: lines.append(f"\n*... et {len(q) - 10} autre(s) musique(s)*")
         e.add_field(name="⏳ À suivre", value="\n".join(lines), inline=False)
-        e.set_footer(text=f"Total : {len(q)} musique(s) en attente • Durée totale : {fmt_dur(total_q_duration)}")
-    else:
-        e.set_footer(text="Aucune musique suivante • La lecture s'arrêtera à la fin de ce morceau.")
-
+        e.set_footer(text=f"Total : {len(q)} musique(s) en attente • Durée totale : {fmt_dur(sum(int(s.get('duration', 0)) for s in q))}")
+    else: e.set_footer(text="Aucune musique suivante • Fin de lecture après ce morceau.")
     await music_channel.send(embed=e)
 
 # ============================================================
-# Fonction centrale d'execution de la Musique (Partagee)
+# Mode d'exécution de la lecture
 # ============================================================
-async def run_play(ctx, query, play_now=False):
-    if not ctx.author.voice:
-        return await ctx.send("❌ Rejoins un salon vocal d'abord !")
-    ch = ctx.author.voice.channel
+async def play_song_immediately(ctx, music_channel, song):
+    now_playing[ctx.guild.id] = song
     try:
-        if ctx.voice_client is None:
-            await ch.connect()
-        elif ctx.voice_client.channel != ch:
-            await ctx.voice_client.move_to(ch)
-    except Exception as e:
-        return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
+        src = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS), volume=get_vol(ctx.guild.id))
+        song['start_time'] = datetime.datetime.now()
+        song['paused_duration'] = 0
+        ctx.voice_client.play(src, after=lambda e: play_next_threadsafe(ctx.guild))
+        desc = f"**[{song['title']}]({song['webpage_url']})**\n\n**🎛️ Commandes :**\n⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
+        e = discord.Embed(title="🎵 En cours de lecture", description=desc, color=0x5865F2)
+        if song['thumbnail']: e.set_thumbnail(url=song['thumbnail'])
+        e.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+        e.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
+        await music_channel.send(embed=e)
+    except Exception as err: await music_channel.send(f"❌ Erreur lecture : `{err}`")
+
+async def run_play(ctx, query, play_now=False):
+    if not ctx.author.voice: return await ctx.send("❌ Rejoins un salon vocal d'abord !")
+    try:
+        if ctx.voice_client is None: await ctx.author.voice.channel.connect()
+        elif ctx.voice_client.channel != ctx.author.voice.channel: await ctx.voice_client.move_to(ctx.author.voice.channel)
+    except Exception as e: return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
 
     music_channel = bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel
-
     try:
         song = await extract_audio(query)
         song['original_query'] = query
-    except Exception as e:
-        return await music_channel.send(f"❌ Impossible de charger : `{e}`")
+    except Exception as e: return await music_channel.send(f"❌ Impossible de charger : `{e}`")
 
-    gid = ctx.guild.id
-    q = get_queue(gid)
-    
+    q = get_queue(ctx.guild.id)
     hourly_events["bot_songs"].add(song['title'])
 
     if play_now:
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-            # Mettre la musique en première position dans la file
             q.appendleft(song)
-            # Stopper l'ancienne (le callback déclenchera automatiquement play_next)
             ctx.voice_client.stop()
-            
-            embed = discord.Embed(
-                title="⚡ Lecture Prioritaire Immédiate", 
-                description=f"**[{song['title']}]({song['webpage_url']})** a été lancé à la place du son précédent !", 
-                color=0xE91E63
-            )
-            if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-            await music_channel.send(embed=embed)
-        else:
-            await play_song_immediately(ctx, music_channel, song)
+            e = discord.Embed(title="⚡ Lecture Prioritaire Immédiate", description=f"**[{song['title']}]({song['webpage_url']})** lance !", color=0xE91E63)
+            if song['thumbnail']: e.set_thumbnail(url=song['thumbnail'])
+            await music_channel.send(embed=e)
+        else: await play_song_immediately(ctx, music_channel, song)
     else:
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
             q.append(song)
-            description = (
-                f"**[{song['title']}]({song['webpage_url']})**\n\n"
-                "ℹ️ *Tapez `!queue` pour voir la file d'attente.*"
-            )
-            embed = discord.Embed(title="📋 Ajouté à la file d'attente", description=description, color=0x57F287)
-            if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-            embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-            embed.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
-            await music_channel.send(embed=embed)
-        else:
-            await play_song_immediately(ctx, music_channel, song)
+            desc = f"**[{song['title']}]({song['webpage_url']})**\n\nℹ️ *Tapez `!queue` pour voir la file d'attente.*"
+            e = discord.Embed(title="📋 Ajouté à la file d'attente", description=desc, color=0x57F287)
+            if song['thumbnail']: e.set_thumbnail(url=song['thumbnail'])
+            e.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+            e.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
+            await music_channel.send(embed=e)
+        else: await play_song_immediately(ctx, music_channel, song)
 
 # ============================================================
 # Fonction centrale d'appel de l'IA (mini-NGR)
@@ -699,276 +404,158 @@ async def run_ask(ctx, question):
     print(f"[ASK] {ctx.author.name}: '{question}'", flush=True)
     async with ctx.typing():
         try:
-            # 1. Appel direct de l'IA pour obtenir une réponse décontractée
-            memory_obj, memory_msg_id = await load_memory(ctx.author.id)
-            ai_response, is_learning = await call_ai(
-                str(ctx.author.id), ctx.author.name, question, memory_obj
-            )
-            await save_memory(ctx.author.id, memory_obj, memory_msg_id)
+            mem, mem_id = await load_memory(ctx.author.id)
+            ai_resp, is_learn = await call_ai(ctx.author.id, ctx.author.name, question, mem)
+            await save_memory(ctx.author.id, mem, mem_id)
 
-            # 2. Extraction de toutes les actions de musique à partir du message IA
-            actions = []
-            for match in re.finditer(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_response):
-                actions.append((match.group(1).upper(), match.group(2) if match.group(2) else ""))
-            
-            # Nettoyer les balises d'action du message affiché
-            ai_response = re.sub(r"\[ACTION:.*?\]", "", ai_response).strip()
+            actions = [(m.group(1).upper(), m.group(2) if m.group(2) else "") for m in re.finditer(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_resp)]
+            ai_resp = re.sub(r"\[ACTION:.*?\]", "", ai_resp).strip()
 
-            # 3. Envoyer la réponse du bot dans le chat
-            if is_learning:
-                await ctx.reply(f"📝 *C'est noté frérot, je m'en souviendrai !*\n\n{ai_response}")
-            else:
-                await ctx.reply(f"👾 {ai_response}")
+            if is_learn: await ctx.reply(f"📝 *C'est noté frérot, je m'en souviendrai !*\n\n{ai_resp}")
+            else: await ctx.reply(f"👾 {ai_resp}")
 
-            # 4. Exécuter les actions musicales détectées par l'IA (avec contrôle de sécurité)
-            for action_type, action_arg in actions:
-                await asyncio.sleep(0.5) # Délai naturel entre actions
+            for a_type, a_arg in actions:
+                await asyncio.sleep(0.5)
+                now_intent = any(x in question.lower() for x in ["tout de suite", "maintenant", "priorite", "direct", "prioritaire"])
                 
-                # Détecter s'il faut jouer immédiatement
-                play_now_intent = False
-                if any(x in question.lower() for x in ["tout de suite", "maintenant", "priorite", "direct", "prioritaire"]):
-                    play_now_intent = True
-                
-                if action_type == "PLAY" and action_arg:
-                    if is_music_request(question):
-                        await run_play(ctx, action_arg, play_now=play_now_intent)
-                    else:
-                        print(f"[SECURITY] PLAY filtre pour : '{question}'", flush=True)
-                        
-                elif action_type == "PLAY_NOW" and action_arg:
-                    if is_music_request(question):
-                        await run_play(ctx, action_arg, play_now=True)
-                    else:
-                        print(f"[SECURITY] PLAY_NOW filtre", flush=True)
-                        
-                elif action_type == "SKIP":
+                if a_type == "PLAY" and a_arg:
+                    if is_music_request(question): await run_play(ctx, a_arg, play_now=now_intent)
+                elif a_type == "PLAY_NOW" and a_arg:
+                    if is_music_request(question): await run_play(ctx, a_arg, play_now=True)
+                elif a_type == "SKIP":
                     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
                         ctx.voice_client.stop()
                         await ctx.send("⏭️ Musique passée par mini-NGR !")
-                        
-                elif action_type == "PAUSE":
+                elif a_type == "PAUSE":
                     if ctx.voice_client and ctx.voice_client.is_playing():
                         ctx.voice_client.pause()
-                        # Enregistrer le moment de la pause
                         now_playing[ctx.guild.id]['pause_start'] = datetime.datetime.now()
                         await ctx.send("⏸️ Musique mise en pause par mini-NGR.")
-                        
-                elif action_type == "RESUME":
+                elif a_type == "RESUME":
                     if ctx.voice_client and ctx.voice_client.is_paused():
                         ctx.voice_client.resume()
-                        # Calculer le temps passé en pause
                         song = now_playing[ctx.guild.id]
                         if 'pause_start' in song:
                             song['paused_duration'] = song.get('paused_duration', 0) + (datetime.datetime.now() - song['pause_start']).total_seconds()
                             del song['pause_start']
                         await ctx.send("▶️ Lecture reprise par mini-NGR.")
-                        
-                elif action_type == "STOP":
+                elif a_type == "STOP":
                     if ctx.voice_client:
                         get_queue(ctx.guild.id).clear()
                         now_playing[ctx.guild.id] = None
-                        if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-                            ctx.voice_client.stop()
+                        if ctx.voice_client.is_playing() or ctx.voice_client.is_paused(): ctx.voice_client.stop()
                         await ctx.voice_client.disconnect()
                         await ctx.send("🛑 Lecture arrêtée par mini-NGR.")
-                        
-                elif action_type == "CLEARQUEUE":
-                    gid = ctx.guild.id
-                    get_queue(gid).clear()
-                    music_channel = bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel
-                    await music_channel.send("🧹 La file d'attente a été vidée par mini-NGR !")
-                    
-                elif action_type == "QUEUE":
-                    await show_queue(ctx)
-
+                elif a_type == "CLEARQUEUE":
+                    get_queue(ctx.guild.id).clear()
+                    await (bot.get_channel(MUSIC_CHANNEL_ID) or ctx.channel).send("🧹 La file d'attente a été vidée !")
+                elif a_type == "QUEUE": await show_queue(ctx)
         except Exception as e:
             print(f"[ASK ERREUR] {e}", flush=True)
             await ctx.send(f"❌ mini-NGR a bugué : `{e}`")
 
 # ============================================================
-# Commande IA standard (!ask)
+# Commandes Discord standard
 # ============================================================
 @bot.command(name="ask")
-async def ask(ctx, *, question: str):
-    await run_ask(ctx, question)
+async def ask(ctx, *, question: str): await run_ask(ctx, question)
 
-# ============================================================
-# Commande de Déclenchement Manuel pour Tester l'Activite
-# ============================================================
 @bot.command(name="trigger_hourly")
 @commands.has_permissions(administrator=True)
 async def trigger_hourly(ctx):
-    await ctx.send("⚡ Lancement manuel de la synthèse d'activité...")
-    global hourly_events
-    
-    # Si aucune activite n'est enregistree, simuler une activite de test
-    if not (hourly_events["games"] or hourly_events["songs"] or hourly_events["bot_songs"] or hourly_events["chatters"]):
+    await ctx.send("⚡ Lancement manuel...")
+    if not (hourly_events["games"] or hourly_events["songs"] or hourly_events["chatters"]):
         hourly_events["chatters"].add(ctx.author.name)
-        hourly_events["games"].add(f"{ctx.author.name} code sur son serveur")
-        
+        hourly_events["games"].add("Dev")
     await process_hourly_summary()
 
-# ============================================================
-# Commandes d'Administration Utiles (Contrôle du serveur)
-# ============================================================
 @bot.command(name="clear", aliases=["purge"])
 @commands.has_permissions(manage_messages=True)
 async def clear_messages(ctx, limit: int):
-    """Supprime un nombre défini de messages dans le salon."""
     await ctx.message.delete()
     deleted = await ctx.channel.purge(limit=limit)
-    alert = await ctx.send(f"🧹 **{len(deleted)} messages** ont été supprimés par mini-NGR !")
+    alert = await ctx.send(f"🧹 **{len(deleted)} messages** supprimés !")
     await asyncio.sleep(4)
     await alert.delete()
 
 @bot.command(name="vmove")
 @commands.has_permissions(move_members=True)
 async def voice_move(ctx, member: discord.Member, *, channel_name: str):
-    """Déplace un membre vers un autre salon vocal."""
-    target = discord.utils.get(ctx.guild.voice_channels, name=channel_name)
-    if not target:
-        target = next((c for c in ctx.guild.voice_channels if channel_name.lower() in c.name.lower()), None)
-        
-    if not target:
-        return await ctx.send("❌ Salon vocal introuvable.")
-        
-    if not member.voice:
-        return await ctx.send(f"❌ {member.mention} n'est connecté à aucun salon vocal.")
-        
+    target = discord.utils.get(ctx.guild.voice_channels, name=channel_name) or next((c for c in ctx.guild.voice_channels if channel_name.lower() in c.name.lower()), None)
+    if not target or not member.voice: return await ctx.send("❌ Action impossible (salon introuvable ou membre déconnecté).")
     await member.move_to(target)
-    await ctx.send(f"🚀 {member.mention} a été déplacé vers **{target.name}** !")
+    await ctx.send(f"🚀 {member.mention} déplacé vers **{target.name}** !")
 
 @bot.command(name="vmute")
 @commands.has_permissions(mute_members=True)
 async def voice_mute(ctx, member: discord.Member):
-    """Mute un membre dans le salon vocal."""
-    if not member.voice:
-        return await ctx.send(f"❌ {member.mention} n'est pas en vocal.")
-    await member.edit(mute=True)
-    await ctx.send(f"🔇 {member.mention} a été réduit au silence par mini-NGR.")
+    if member.voice: await member.edit(mute=True); await ctx.send(f"🔇 {member.mention} réduit au silence.")
 
 @bot.command(name="vunmute")
 @commands.has_permissions(mute_members=True)
 async def voice_unmute(ctx, member: discord.Member):
-    """Redonne la parole à un membre muté en vocal."""
-    if not member.voice:
-        return await ctx.send(f"❌ {member.mention} n'est pas en vocal.")
-    await member.edit(mute=False)
-    await ctx.send(f"🔊 {member.mention} peut à nouveau parler.")
-
-# ============================================================
-# Commandes Utilitaires & Jeux (Minuteur, Sondage, Profils)
-# ============================================================
-def parse_time(time_str):
-    match = re.match(r"^(\d+)([smh])$", time_str.lower())
-    if not match:
-        return None
-    val, unit = int(match.group(1)), match.group(2)
-    if unit == "s":
-        return val
-    elif unit == "m":
-        return val * 60
-    elif unit == "h":
-        return val * 3600
-    return None
+    if member.voice: await member.edit(mute=False); await ctx.send(f"🔊 {member.mention} peut parler.")
 
 @bot.command(name="timer", aliases=["alarm", "remind"])
 async def start_timer(ctx, duration: str, *, reminder: str = "Le temps est écoulé !"):
-    """Lance un minuteur et ping l'utilisateur quand c'est fini."""
-    seconds = parse_time(duration)
-    if seconds is None:
-        return await ctx.send("❌ Format invalide. Exemple : `!timer 10s`, `!timer 5m`, `!timer 1h`.")
-        
-    await ctx.send(f"⏳ Minuteur lancé pour **{duration}** : *\"{reminder}\"*")
-    await asyncio.sleep(seconds)
+    m = re.match(r"^(\d+)([smh])$", duration.lower())
+    if not m: return await ctx.send("❌ Format invalide (ex: 10s, 5m, 1h).")
+    val, unit = int(m.group(1)), m.group(2)
+    sec = val if unit == "s" else val * 60 if unit == "m" else val * 3600
+    await ctx.send(f"⏳ Minuteur lancé pour **{duration}**.")
+    await asyncio.sleep(sec)
     await ctx.send(f"⏰ {ctx.author.mention} **Alarme !** {reminder}")
 
 @bot.command(name="poll")
 async def create_poll(ctx, *, args: str):
-    """Crée un sondage. Syntaxe : !poll Question | Option1 | Option2..."""
     parts = [p.strip() for p in args.split("|")]
-    if len(parts) < 3:
-        return await ctx.send("❌ Syntaxe : `!poll Question | Choix 1 | Choix 2...` (2 choix minimum)")
-        
-    question = parts[0]
-    options = parts[1:10]  # Max 9 choix
+    if len(parts) < 3: return await ctx.send("❌ Syntaxe : `!poll Question | Choix 1 | Choix 2...`")
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
-    
-    desc = ""
-    for i, opt in enumerate(options):
-        desc += f"{emojis[i]} {opt}\n"
-        
-    embed = discord.Embed(title=f"📊 {question}", description=desc, color=0x5865F2)
-    embed.set_footer(text=f"Sondage créé par {ctx.author.name}")
-    poll_msg = await ctx.send(embed=embed)
-    
-    for i in range(len(options)):
-        await poll_msg.add_reaction(emojis[i])
+    desc = "\n".join(f"{emojis[i]} {opt}" for i, opt in enumerate(parts[1:10]))
+    poll = await ctx.send(embed=discord.Embed(title=f"📊 {parts[0]}", description=desc, color=0x5865F2))
+    for i in range(len(parts[1:10])): await poll.add_reaction(emojis[i])
 
 @bot.command(name="userinfo")
 async def user_info(ctx, member: discord.Member = None):
-    """Affiche les infos de profil d'un membre."""
-    member = member or ctx.author
-    embed = discord.Embed(title=f"👤 Profil de {member.name}", color=member.color)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    
-    roles = [r.mention for r in member.roles[1:]]  # Exclure @everyone
-    roles_str = ", ".join(roles) if roles else "Aucun rôle"
-    
-    act = member.activity
-    act_str = f"{act.name}" if act else "Aucune activité en cours"
-    
-    embed.add_field(name="Pseudo", value=member.nick or "Aucun", inline=True)
-    embed.add_field(name="Statut", value=str(member.status).upper(), inline=True)
-    embed.add_field(name="Activité", value=act_str, inline=True)
-    embed.add_field(name="Création du compte", value=member.created_at.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(name="Rejoint le serveur", value=member.joined_at.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(name="Rôles", value=roles_str, inline=False)
-    
-    await ctx.send(embed=embed)
+    m = member or ctx.author
+    act = m.activity.name if m.activity else "Aucune"
+    e = discord.Embed(title=f"👤 {m.name}", color=m.color)
+    e.set_thumbnail(url=m.display_avatar.url)
+    e.add_field(name="Activité", value=act, inline=True)
+    e.add_field(name="Création", value=m.created_at.strftime("%d/%m/%Y"), inline=True)
+    e.add_field(name="Rejoint", value=m.joined_at.strftime("%d/%m/%Y"), inline=True)
+    await ctx.send(embed=e)
 
 @bot.command(name="serverinfo")
 async def server_info(ctx):
-    """Affiche les statistiques et infos du serveur."""
-    guild = ctx.guild
-    embed = discord.Embed(title=f"🏰 {guild.name}", color=0x5865F2)
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
-        
-    embed.add_field(name="Créateur", value=guild.owner.mention if guild.owner else "Inconnu", inline=True)
-    embed.add_field(name="Date de création", value=guild.created_at.strftime("%d/%m/%Y"), inline=True)
-    embed.add_field(name="Membres", value=str(guild.member_count), inline=True)
-    embed.add_field(name="Salons Textuels", value=str(len(guild.text_channels)), inline=True)
-    embed.add_field(name="Salons Vocaux", value=str(len(guild.voice_channels)), inline=True)
-    
-    await ctx.send(embed=embed)
+    g = ctx.guild
+    e = discord.Embed(title=f"🏰 {g.name}", color=0x5865F2)
+    if g.icon: e.set_thumbnail(url=g.icon.url)
+    e.add_field(name="Membres", value=str(g.member_count), inline=True)
+    e.add_field(name="Création", value=g.created_at.strftime("%d/%m/%Y"), inline=True)
+    await ctx.send(embed=e)
 
-# ============================================================
-# Commandes Musique (Redirigées vers run_play)
-# ============================================================
 @bot.command(name="play", aliases=["p"])
 async def play(ctx, *, query: str):
-    async with ctx.typing():
-        await run_play(ctx, query)
+    async with ctx.typing(): await run_play(ctx, query)
 
 @bot.command(name="pause")
 async def pause(ctx):
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.pause()
-        if ctx.guild.id in now_playing:
-            now_playing[ctx.guild.id]['pause_start'] = datetime.datetime.now()
-        await ctx.send("⏸️ Musique en pause. Tapez `!resume` pour reprendre.")
+        if ctx.guild.id in now_playing: now_playing[ctx.guild.id]['pause_start'] = datetime.datetime.now()
+        await ctx.send("⏸️ En pause. Tapez `!resume` pour reprendre.")
 
 @bot.command(name="resume")
 async def resume(ctx):
     if ctx.voice_client and ctx.voice_client.is_paused():
         ctx.voice_client.resume()
         if ctx.guild.id in now_playing:
-            song = now_playing[ctx.guild.id]
-            if 'pause_start' in song:
-                song['paused_duration'] = song.get('paused_duration', 0) + (datetime.datetime.now() - song['pause_start']).total_seconds()
-                del song['pause_start']
-        await ctx.send("▶️ Reprise de la lecture.")
+            s = now_playing[ctx.guild.id]
+            if 'pause_start' in s:
+                s['paused_duration'] = s.get('paused_duration', 0) + (datetime.datetime.now() - s['pause_start']).total_seconds()
+                del s['pause_start']
+        await ctx.send("▶️ Lecture reprise.")
 
 @bot.command(name="skip", aliases=["s"])
 async def skip(ctx):
@@ -978,38 +565,30 @@ async def skip(ctx):
 
 @bot.command(name="stop")
 async def stop(ctx):
-    if not ctx.voice_client:
-        return await ctx.send("❌ Le bot n'est pas connecté.")
+    if not ctx.voice_client: return await ctx.send("❌ Bot déconnecté.")
     get_queue(ctx.guild.id).clear()
     now_playing[ctx.guild.id] = None
-    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-        ctx.voice_client.stop()
+    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused(): ctx.voice_client.stop()
     await ctx.voice_client.disconnect()
     await ctx.send("🛑 Lecture arrêtée et déconnexion.")
 
 @bot.command(name="queue", aliases=["q"])
-async def queue_cmd(ctx):
-    await show_queue(ctx)
+async def queue_cmd(ctx): await show_queue(ctx)
 
 @bot.command(name="clearqueue", aliases=["cq", "clean", "empty"])
 async def clear_queue_cmd(ctx):
-    gid = ctx.guild.id
-    q = get_queue(gid)
-    if not q:
-        return await ctx.send("❌ La file d'attente est déjà vide.")
+    q = get_queue(ctx.guild.id)
+    if not q: return await ctx.send("❌ La file d'attente est déjà vide.")
     q.clear()
-    await ctx.send("🧹 La file d'attente a été vidée par mini-NGR !")
+    await ctx.send("🧹 File d'attente vidée !")
 
 @bot.command(name="volume", aliases=["vol"])
 async def volume(ctx, level: int):
-    if not ctx.voice_client:
-        return await ctx.send("❌ Le bot n'est pas connecté.")
-    if not (0 <= level <= 100):
-        return await ctx.send("❌ Le volume doit être entre 0 et 100.")
+    if not ctx.voice_client: return await ctx.send("❌ Bot déconnecté.")
+    if not (0 <= level <= 100): return await ctx.send("❌ Entre 0 et 100.")
     v = level / 100
     volumes[ctx.guild.id] = v
-    if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'):
-        ctx.voice_client.source.volume = v
+    if ctx.voice_client.source and hasattr(ctx.voice_client.source, 'volume'): ctx.voice_client.source.volume = v
     await ctx.send(f"🔊 Volume : **{level}%**")
 
 bot.run(TOKEN)
