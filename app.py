@@ -308,7 +308,7 @@ async def extract(query):
 
     # â”€â”€ Ã‰tape 2 : URL de stream via Worker Cloudflare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
-        payload = json.dumps({"video_id": vid} if vid else {"query": query}).encode()
+        payload = json.dumps({"query": f"https://www.youtube.com/watch?v={vid}" if vid else query}).encode()
         req = urllib.request.Request(CF_MUSIC, data=payload,
             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}, method="POST")
         res = json.loads(await asyncio.to_thread(
