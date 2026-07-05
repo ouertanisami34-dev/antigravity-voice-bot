@@ -327,7 +327,7 @@ async def play(ctx, *, query: str):
             now_playing[gid] = song
             try:
                 src = discord.PCMVolumeTransformer(
-                    discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
+                    discord.FFmpegPCMAudio(song['url'], **FMPEG_OPTS),
                     volume=get_vol(gid)
                 )
                 ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
