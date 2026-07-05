@@ -106,15 +106,15 @@ def is_music_request(question):
 @bot.check
 async def check_command_channels(ctx):
     music_commands = {"play", "p", "pause", "resume", "skip", "s", "stop", "queue", "q", "volume", "vol"}
-    ai_commands = {"ask", "trigger_hourly", "timer", "alarm", "remind", "poll", "userinfo", "serverinfo"}
-
-    target_channel = None
+    
+    # Déterminer le salon cible selon la commande
     if ctx.command.name in music_commands:
         target_channel = MUSIC_CHANNEL_ID
-    elif ctx.command.name in ai_commands:
+    else:
+        # Toutes les autres commandes du bot vont dans mini-ngr
         target_channel = MINI_NGR_CHANNEL_ID
 
-    if target_channel and ctx.channel.id != target_channel:
+    if ctx.channel.id != target_channel:
         try:
             await ctx.message.delete()
         except Exception:
@@ -323,11 +323,14 @@ async def call_ai(user_id, username, question, memory_obj):
         "Tu as le contrôle sur le lecteur de musique du serveur ! "
         "Uniquement si l'utilisateur te demande explicitement de contrôler la musique (jouer, passer, couper, etc.), "
         "ajoute l'une de ces balises à la toute fin de ta réponse (elle sera invisible pour lui) :\n"
-        "- [ACTION:PLAY:nom de la musique ou URL] (cela l'ajoutera à la file d'attente si une musique est déjà en cours, donc utilise cette balise même s'il y a déjà du son !)\n"
+        "- [ACTION:PLAY:nom de la musique ou URL] (ajoute à la file d'attente s'il y a déjà du son)\n"
+        "- [ACTION:PLAY_NOW:nom de la musique ou URL] (uniquement si l'utilisateur te demande d'y jouer TOUT DE SUITE, MAINTENANT, ou EN PRIORITÉ, cela coupera la musique actuelle pour lancer celle-ci directement)\n"
         "- [ACTION:SKIP] (seulement s'il te demande de passer à la suivante)\n"
         "- [ACTION:PAUSE] (seulement s'il te demande de mettre en pause)\n"
         "- [ACTION:RESUME] (seulement s'il te demande de reprendre)\n"
         "- [ACTION:STOP] (seulement s'il te demande d'arrêter ou de quitter)\n\n"
+        "Tu peux enchaîner plusieurs balises de PLAY si l'utilisateur te demande plusieurs musiques d'un coup. "
+        "Exemple pour Jul et PNL : 'Je t'ajoute ça direct ! [ACTION:PLAY:Jul] [ACTION:PLAY:PNL]'\n\n"
         "IMPORTANT : Si l'utilisateur te dit bonjour, te parle normalement ou te pose une question générale, "
         "réponds-lui simplement sans ajouter de balise [ACTION:...] à la fin. Ne mets JAMAIS de balise pour une simple discussion !"
         "\nExemple de discussion simple : 'Salut frérot ! Ça va ?'\n"
@@ -555,9 +558,36 @@ async def on_voice_state_update(member, before, after):
                 await vc.disconnect()
 
 # ============================================================
+# Fonction de lecture de base (partagée)
+# ============================================================
+async def play_song_immediately(ctx, music_channel, song):
+    gid = ctx.guild.id
+    now_playing[gid] = song
+    try:
+        src = discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
+            volume=get_vol(gid)
+        )
+        ctx.voice_client.play(src, after=lambda e: play_next_threadsafe(ctx.guild))
+
+        desc_play = (
+            f"**[{song['title']}]({song['webpage_url']})**\n\n"
+            "**🎛️ Commandes :**\n"
+            "⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
+        )
+
+        embed = discord.Embed(title="🎵 En cours de lecture", description=desc_play, color=0x5865F2)
+        if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
+        embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
+        embed.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
+        await music_channel.send(embed=embed)
+    except Exception as e:
+        await music_channel.send(f"❌ Erreur lecture : `{e}`")
+
+# ============================================================
 # Fonction centrale d'execution de la Musique (Partagee)
 # ============================================================
-async def run_play(ctx, query):
+async def run_play(ctx, query, play_now=False):
     if not ctx.author.voice:
         return await ctx.send("❌ Rejoins un salon vocal d'abord !")
     ch = ctx.author.voice.channel
@@ -569,49 +599,53 @@ async def run_play(ctx, query):
     except Exception as e:
         return await ctx.send(f"❌ Connexion vocale impossible : `{e}`")
 
+    # Déterminer le salon cible pour les embeds musique (toujours #🎵-musique)
+    music_channel = bot.get_channel(MUSIC_CHANNEL_ID)
+    if not music_channel:
+        music_channel = ctx.channel
+
     try:
         song = await extract_audio(query)
     except Exception as e:
-        return await ctx.send(f"❌ Impossible de charger : `{e}`")
+        return await music_channel.send(f"❌ Impossible de charger : `{e}`")
 
     gid = ctx.guild.id
     q = get_queue(gid)
     
     hourly_events["bot_songs"].add(song['title'])
 
-    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
-        q.append(song)
-        description = (
-            f"**[{song['title']}]({song['webpage_url']})**\n\n"
-            "ℹ️ *Tapez `!queue` pour voir la file d'attente.*"
-        )
-        embed = discord.Embed(title="📋 Ajouté à la file d'attente", description=description, color=0x57F287)
-        if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
-        embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-        embed.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
-        await ctx.send(embed=embed)
+    if play_now:
+        # Mode lecture immédiate (coupe le son actuel en le replaçant en tête de liste)
+        if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+            # Insérer la musique tout de suite au début de la queue
+            q.appendleft(song)
+            # Arrêter la lecture en cours (déclenchera l'événement play_next_threadsafe)
+            ctx.voice_client.stop()
+            
+            embed = discord.Embed(
+                title="⚡ Lecture Prioritaire Immédiate", 
+                description=f"**[{song['title']}]({song['webpage_url']})** a été lancé à la place du son précédent !", 
+                color=0xE91E63
+            )
+            if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
+            await music_channel.send(embed=embed)
+        else:
+            await play_song_immediately(ctx, music_channel, song)
     else:
-        now_playing[gid] = song
-        try:
-            src = discord.PCMVolumeTransformer(
-                discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
-                volume=get_vol(gid)
-            )
-            ctx.voice_client.play(src, after=lambda e: play_next_threadsafe(ctx.guild))
-
-            desc_play = (
+        # Mode normal (file d'attente)
+        if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+            q.append(song)
+            description = (
                 f"**[{song['title']}]({song['webpage_url']})**\n\n"
-                "**🎛️ Commandes :**\n"
-                "⏸️ `!pause`  |  ▶️ `!resume`  |  ⏭️ `!skip`  |  🛑 `!stop`"
+                "ℹ️ *Tapez `!queue` pour voir la file d'attente.*"
             )
-
-            embed = discord.Embed(title="🎵 En cours de lecture", description=desc_play, color=0x5865F2)
+            embed = discord.Embed(title="📋 Ajouté à la file d'attente", description=description, color=0x57F287)
             if song['thumbnail']: embed.set_thumbnail(url=song['thumbnail'])
             embed.add_field(name="⏱️ Durée", value=fmt_dur(song['duration']), inline=True)
-            embed.add_field(name="🎤 Chaîne", value=song['uploader'], inline=True)
-            await ctx.send(embed=embed)
-        except Exception as e:
-            await ctx.send(f"❌ Erreur lecture : `{e}`")
+            embed.add_field(name="📍 Position", value=f"#{len(q)}", inline=True)
+            await music_channel.send(embed=embed)
+        else:
+            await play_song_immediately(ctx, music_channel, song)
 
 # ============================================================
 # Fonction centrale d'appel de l'IA (mini-NGR)
@@ -627,13 +661,10 @@ async def run_ask(ctx, question):
             )
             await save_memory(ctx.author.id, memory_obj, memory_msg_id)
 
-            # 2. Extraction de l'action de musique à partir du message IA
-            action_type = None
-            action_arg = ""
-            action_match = re.search(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_response)
-            if action_match:
-                action_type = action_match.group(1).upper()
-                action_arg = action_match.group(2) if action_match.group(2) else ""
+            # 2. Extraction de toutes les actions de musique à partir du message IA
+            actions = []
+            for match in re.finditer(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_response):
+                actions.append((match.group(1).upper(), match.group(2) if match.group(2) else ""))
             
             # Nettoyer les balises d'action du message affiché
             ai_response = re.sub(r"\[ACTION:.*?\]", "", ai_response).strip()
@@ -644,26 +675,37 @@ async def run_ask(ctx, question):
             else:
                 await ctx.reply(f"👾 {ai_response}")
 
-            # 4. Exécuter l'action musicale détectée par l'IA (avec contrôle de sécurité)
-            if action_type:
-                await asyncio.sleep(0.5) # Délai naturel
+            # 4. Exécuter les actions musicales détectées par l'IA (avec contrôle de sécurité)
+            for action_type, action_arg in actions:
+                await asyncio.sleep(0.5) # Délai naturel entre actions
+                
                 if action_type == "PLAY" and action_arg:
                     if is_music_request(question):
-                        await run_play(ctx, action_arg)
+                        await run_play(ctx, action_arg, play_now=False)
                     else:
                         print(f"[SECURITY] PLAY filtre pour la question hors-sujet musique : '{question}'", flush=True)
+                        
+                elif action_type == "PLAY_NOW" and action_arg:
+                    if is_music_request(question):
+                        await run_play(ctx, action_arg, play_now=True)
+                    else:
+                        print(f"[SECURITY] PLAY_NOW filtre", flush=True)
+                        
                 elif action_type == "SKIP":
                     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
                         ctx.voice_client.stop()
                         await ctx.send("⏭️ Musique passée par mini-NGR !")
+                        
                 elif action_type == "PAUSE":
                     if ctx.voice_client and ctx.voice_client.is_playing():
                         ctx.voice_client.pause()
                         await ctx.send("⏸️ Musique mise en pause par mini-NGR.")
+                        
                 elif action_type == "RESUME":
                     if ctx.voice_client and ctx.voice_client.is_paused():
                         ctx.voice_client.resume()
                         await ctx.send("▶️ Lecture reprise par mini-NGR.")
+                        
                 elif action_type == "STOP":
                     if ctx.voice_client:
                         get_queue(ctx.guild.id).clear()
