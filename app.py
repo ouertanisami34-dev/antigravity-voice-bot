@@ -287,6 +287,17 @@ async def extract(query):
         meta['url'] = stream_url
         if not meta.get('webpage_url') and vid:
             meta['webpage_url'] = f"https://www.youtube.com/watch?v={vid}"
+        
+        # SÃ‰CURITÃ‰ : Remplir les mÃ©tadonnÃ©es manquantes depuis le Worker
+        if not meta.get('title') or meta['title'] == query:
+            meta['title'] = res.get('title', query)
+        if not meta.get('duration'):
+            meta['duration'] = res.get('duration', 0)
+        if not meta.get('uploader') or meta['uploader'] == '?':
+            meta['uploader'] = res.get('uploader', '?')
+        if not meta.get('thumbnail'):
+            meta['thumbnail'] = res.get('thumbnail', '')
+            
         return meta
     except Exception as e:
         print(f"[STREAM ERR] Worker echoue: {e}", flush=True)
@@ -374,7 +385,6 @@ async def run_play(guild, query, requester="?", channel=None):
     # Pas de musique en cours â†’ lancer directement
     now_playing[guild.id] = song  # placeholder pour bloquer les doubles appels
     Q(guild.id).appendleft(song)
-    now_playing[guild.id] = None  # reset pour que play_next prenne la main
     asyncio.create_task(play_next(guild))
     return song
 
@@ -633,6 +643,10 @@ async def ai_respond(user_id, username, question, guild):
         f"Heure locale : {datetime.datetime.now().strftime('%H:%M')}.\n\n"
         f"ACTIVITES SUR LE SERVEUR :\n{game_ctx}\n\n"
         f"MEMOIRE de {username} :\n{facts_ctx}\n\n"
+        f"CONTROLE MUSIQUE IMPORTANT :\n"
+        f"Tu AS le pouvoir de controler la musique et de la faire jouer sur le serveur Discord !\n"
+        f"Ne reponds JAMAIS que tu ne peux pas jouer de musique directement ou en direct. "
+        f"Si l'utilisateur te demande de lancer, jouer ou mettre une chanson, tu dois simplement accepter de le faire et ajouter la balise d'action correspondante en fin de reponse.\n\n"
         f"REGLES MUSIQUE CRITIQUES :\n"
         f"- Si l'utilisateur demande de jouer de la musique, ajoute EN FIN de ta reponse : [ACTION:PLAY:titre - artiste]\n"
         f"- Si l'utilisateur demande de passer/skipper la musique, ajoute EN FIN de ta reponse : [ACTION:SKIP]\n"
@@ -640,7 +654,8 @@ async def ai_respond(user_id, username, question, guild):
         f"- Si l'utilisateur demande de mettre en pause la musique, ajoute EN FIN de ta reponse : [ACTION:PAUSE]\n"
         f"- Si l'utilisateur demande de reprendre la lecture, ajoute EN FIN de ta reponse : [ACTION:RESUME]\n"
         f"- Pour une LISTE (ex: '10 musiques de funk'), genere UNE balise play par musique.\n"
-        f"- Le format EXACT de play est : [ACTION:PLAY:Titre - Artiste]"
+        f"- Le format EXACT de play est : [ACTION:PLAY:Titre - Artiste]\n"
+        f"Exemple de bonne reponse: 'Pas de soucis, je te mets Billie Jean de Michael Jackson !' suivi de [ACTION:PLAY:Billie Jean - Michael Jackson]"
     )
 
     msgs = [{"role": "system", "content": sys_prompt}]
