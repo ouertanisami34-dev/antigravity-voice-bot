@@ -434,7 +434,6 @@ async def on_command_error(ctx, error):
 async def on_message(message):
     if message.author.bot: return
     await bot.process_commands(message)
-    # IA uniquement dans #mini-ngr, et pas les commandes
     if message.channel.id != NGR_CH or message.content.startswith("!"): return
 
     async with message.channel.typing():
@@ -442,12 +441,10 @@ async def on_message(message):
             message.author.id, message.author.display_name,
             message.content, message.guild)
 
-    # Parser les actions musique
     actions = re.findall(r'\[ACTION:PLAY:([^\]]+)\]', response)
     clean = re.sub(r'\s*\[ACTION:PLAY:[^\]]+\]', '', response).strip()
     if clean: await message.channel.send(f"👾 {clean}")
 
-    # Executer les actions musique dans #musique
     if actions:
         mus_ch = bot.get_channel(MUS_CH)
         for i, title in enumerate(actions):
