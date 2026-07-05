@@ -193,23 +193,34 @@ def fmt_dur(s):
         return "🔴 Live"
     return str(datetime.timedelta(seconds=int(s)))
 
-def play_next(guild):
+# ============================================================
+# Logique de file d'attente threadsafe asynchrone
+# ============================================================
+def play_next_threadsafe(guild):
+    coro = play_next_async(guild)
+    asyncio.run_coroutine_threadsafe(coro, bot.loop)
+
+async def play_next_async(guild):
     q = get_queue(guild.id)
     vc = guild.voice_client
     if not vc or not vc.is_connected():
         return
     if not q:
         now_playing[guild.id] = None
-        asyncio.run_coroutine_threadsafe(vc.disconnect(), bot.loop)
+        await vc.disconnect()
         return
+        
     song = q.popleft()
     now_playing[guild.id] = song
     try:
+        # Pause d'une demi-seconde pour laisser l'ancien lecteur se fermer proprement
+        await asyncio.sleep(0.5)
+        
         src = discord.PCMVolumeTransformer(
             discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
             volume=get_vol(guild.id)
         )
-        vc.play(src, after=lambda e: play_next(guild))
+        vc.play(src, after=lambda e: play_next_threadsafe(guild))
         print(f"[PLAY] {song['title']}", flush=True)
     except Exception as e:
         print(f"[PLAY ERREUR] {e}", flush=True)
@@ -264,7 +275,7 @@ async def call_ai(user_id, username, question, memory_obj):
         "Tu as le contrôle sur le lecteur de musique du serveur ! "
         "Si l'utilisateur te demande de jouer une musique, passer (skip), mettre en pause ou arrêter, "
         "ajoute impérativement l'une de ces balises à la toute fin de ta réponse (elle sera invisible pour lui) :\n"
-        "- [ACTION:PLAY:nom de la musique ou URL]\n"
+        "- [ACTION:PLAY:nom de la musique ou URL] (cela l'ajoutera à la file d'attente si une musique est déjà en cours, donc utilise cette balise même s'il y a déjà du son !)\n"
         "- [ACTION:SKIP]\n"
         "- [ACTION:PAUSE]\n"
         "- [ACTION:RESUME]\n"
@@ -420,9 +431,15 @@ async def on_message(message):
     if message.author.bot:
         return
     
-    # Enregistrer l'activite de chat de l'utilisateur
+    # Enregistrer l'activite de chat de l'utilisateur dans l'historique de l'heure
     hourly_events["chatters"].add(message.author.name)
     
+    # Si le message est dans #👾-mini-ngr et ne commence pas par !, l'IA repond en direct sans avoir besoin de taper !ask
+    if message.channel.id == MINI_NGR_CHANNEL_ID and not message.content.startswith("!"):
+        ctx = await bot.get_context(message)
+        await run_ask(ctx, message.content)
+        return
+        
     print(f"[MSG] {message.author.name}: {message.content}", flush=True)
     await bot.process_commands(message)
 
@@ -513,7 +530,7 @@ async def run_play(ctx, query):
                 discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
                 volume=get_vol(gid)
             )
-            ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
+            ctx.voice_client.play(src, after=lambda e: play_next_threadsafe(ctx.guild))
 
             desc_play = (
                 f"**[{song['title']}]({song['webpage_url']})**\n\n"
@@ -530,39 +547,39 @@ async def run_play(ctx, query):
             await ctx.send(f"❌ Erreur lecture : `{e}`")
 
 # ============================================================
-# Commande IA (!ask) — mini-NGR
+# Fonction centrale d'appel de l'IA (mini-NGR)
 # ============================================================
-@bot.command(name="ask")
-async def ask(ctx, *, question: str):
+async def run_ask(ctx, question):
     print(f"[ASK] {ctx.author.name}: '{question}'", flush=True)
     async with ctx.typing():
         try:
+            # 1. Appel direct de l'IA pour obtenir une réponse décontractée
             memory_obj, memory_msg_id = await load_memory(ctx.author.id)
             ai_response, is_learning = await call_ai(
                 str(ctx.author.id), ctx.author.name, question, memory_obj
             )
             await save_memory(ctx.author.id, memory_obj, memory_msg_id)
 
-            # Analyse des actions de contrôle de la musique générées par l'IA
-            action_match = re.search(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_response)
+            # 2. Extraction de l'action de musique à partir du message IA
             action_type = None
             action_arg = ""
-            
+            action_match = re.search(r"\[ACTION:(\w+)(?::(.*?))?\]", ai_response)
             if action_match:
                 action_type = action_match.group(1).upper()
                 action_arg = action_match.group(2) if action_match.group(2) else ""
-                # Nettoyer la balise d'action pour ne pas l'afficher à l'utilisateur
-                ai_response = re.sub(r"\[ACTION:.*?\]", "", ai_response).strip()
+            
+            # Nettoyer les balises d'action du message affiché
+            ai_response = re.sub(r"\[ACTION:.*?\]", "", ai_response).strip()
 
-            # Envoyer le texte de réponse du bot
+            # 3. Envoyer la réponse du bot dans le chat
             if is_learning:
                 await ctx.reply(f"📝 *C'est noté frérot, je m'en souviendrai !*\n\n{ai_response}")
             else:
                 await ctx.reply(f"👾 {ai_response}")
 
-            # Exécuter l'action musicale s'il y en a une
+            # 4. Exécuter l'action musicale détectée par l'IA
             if action_type:
-                await asyncio.sleep(0.5) # Léger délai naturel
+                await asyncio.sleep(0.5) # Délai naturel
                 if action_type == "PLAY" and action_arg:
                     await run_play(ctx, action_arg)
                 elif action_type == "SKIP":
@@ -589,6 +606,13 @@ async def ask(ctx, *, question: str):
         except Exception as e:
             print(f"[ASK ERREUR] {e}", flush=True)
             await ctx.send(f"❌ mini-NGR a bugué : `{e}`")
+
+# ============================================================
+# Commande IA standard (!ask)
+# ============================================================
+@bot.command(name="ask")
+async def ask(ctx, *, question: str):
+    await run_ask(ctx, question)
 
 # ============================================================
 # Commande de Déclenchement Manuel pour Tester l'Activite
