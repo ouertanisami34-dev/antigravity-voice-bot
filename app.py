@@ -9,7 +9,9 @@ import datetime
 import traceback
 import threading
 import urllib.request
+import urllib.parse
 import json
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================================
@@ -50,22 +52,16 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ============================================================
-# Configuration YTDL (Bypass Bot detection) & FFmpeg
+# Configuration YTDL & FFmpeg (Fallback uniquement)
 # ============================================================
 YTDL_OPTS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
-    'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
     'nocheckcertificate': True,
     'geo_bypass': True,
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['android'], # Le client android ne declenche pas le blocage bot !
-        }
-    },
 }
 
 FFMPEG_OPTS = {
@@ -85,32 +81,151 @@ def get_vol(gid):
     return volumes.get(gid, 0.5)
 
 # ============================================================
-# Extraction audio
+# Listes de serveurs Proxy (Piped & Invidious)
+# ============================================================
+PIPED_INSTANCES = [
+    "https://pipedapi.adminforge.de",
+    "https://api.piped.yt",
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.us.to",
+    "https://piped-api.lunar.icu",
+    "https://piped-api.hostux.net"
+]
+
+INVIDIOUS_INSTANCES = [
+    "https://yewtu.be",
+    "https://invidious.projectsegfau.lt",
+    "https://invidious.flokinet.to",
+    "https://invidio.xamh.de",
+    "https://invidious.privacydev.net"
+]
+
+def get_yt_video_id(url):
+    pattern = r'(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/)|youtu\.be/)([^?&\s]+)'
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
+
+# ============================================================
+# Recherche hybride Proxy (YouTube Search)
+# ============================================================
+async def search_video(query):
+    encoded = urllib.parse.quote(query)
+    
+    # 1. Tenter la recherche via Piped API
+    print(f"[RECHERCHE] Tentative Piped pour : '{query}'", flush=True)
+    for instance in PIPED_INSTANCES:
+        try:
+            url = f"{instance}/search?q={encoded}&filter=music_songs"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+            items = json.loads(data).get("items", [])
+            if items:
+                v_id = get_yt_video_id(f"https://www.youtube.com{items[0].get('url', '')}")
+                if v_id:
+                    print(f"[RECHERCHE OK] Trouve via Piped ({instance}) : {v_id}", flush=True)
+                    return v_id
+        except Exception:
+            continue
+
+    # 2. Tenter la recherche via Invidious API
+    print(f"[RECHERCHE] Tentative Invidious pour : '{query}'", flush=True)
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            url = f"{instance}/api/v1/search?q={encoded}&type=video"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+            results = json.loads(data)
+            if results and isinstance(results, list):
+                v_id = results[0].get("videoId")
+                if v_id:
+                    print(f"[RECHERCHE OK] Trouve via Invidious ({instance}) : {v_id}", flush=True)
+                    return v_id
+        except Exception:
+            continue
+            
+    return None
+
+# ============================================================
+# Extraction Audio via Proxys
 # ============================================================
 async def extract_audio(query):
-    print(f"[YTDL] Extraction : '{query}'", flush=True)
+    print(f"[EXTRACTION] Cible : '{query}'", flush=True)
     try:
-        data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
-        if 'entries' in data:
-            if not data['entries']:
-                raise Exception("Aucun resultat trouve.")
-            data = data['entries'][0]
+        # Recuperer le Video ID
+        video_id = get_yt_video_id(query)
+        if not video_id:
+            video_id = await search_video(query)
         
-        if not data.get('url'):
-            raise Exception("Pas d'URL audio trouvee.")
+        # Si ce n'est pas du YouTube (SoundCloud, etc.), fallback standard
+        if not video_id:
+            if query.startswith(('http://', 'https://')):
+                print(f"[YTDL FALLBACK] Extraction standard yt-dlp pour : {query}", flush=True)
+                data = await asyncio.to_thread(lambda: ytdl.extract_info(query, download=False))
+                if 'entries' in data:
+                    data = data['entries'][0]
+                return {
+                    'title': data.get('title', 'Inconnu'),
+                    'url': data.get('url'),
+                    'webpage_url': data.get('webpage_url', ''),
+                    'thumbnail': data.get('thumbnail', ''),
+                    'duration': data.get('duration', 0),
+                    'uploader': data.get('uploader', 'Inconnu'),
+                }
+            raise Exception("Aucun resultat trouve.")
 
-        info = {
-            'title': data.get('title', 'Inconnu'),
-            'url': data.get('url'),
-            'webpage_url': data.get('webpage_url', ''),
-            'thumbnail': data.get('thumbnail', ''),
-            'duration': data.get('duration', 0),
-            'uploader': data.get('uploader', 'Inconnu'),
-        }
-        print(f"[YTDL OK] {info['title']}", flush=True)
-        return info
+        # 1. Recuperer le flux audio via Piped API
+        print(f"[FLUX] Tentative Piped pour video: {video_id}", flush=True)
+        for instance in PIPED_INSTANCES:
+            try:
+                url = f"{instance}/streams/{video_id}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+                res_json = json.loads(data)
+                audio_streams = res_json.get("audioStreams", [])
+                if audio_streams:
+                    best_stream = max(audio_streams, key=lambda s: s.get("bitrate", 0))
+                    info = {
+                        'title': res_json.get('title', 'Inconnu'),
+                        'url': best_stream.get('url'),
+                        'webpage_url': f"https://www.youtube.com/watch?v={video_id}",
+                        'thumbnail': res_json.get('thumbnailUrl', ''),
+                        'duration': res_json.get('duration', 0),
+                        'uploader': res_json.get('uploader', 'Inconnu'),
+                    }
+                    print(f"[FLUX OK] Piped ({instance}) : {info['title']}", flush=True)
+                    return info
+            except Exception:
+                continue
+
+        # 2. Recuperer le flux audio via Invidious API
+        print(f"[FLUX] Tentative Invidious pour video: {video_id}", flush=True)
+        for instance in INVIDIOUS_INSTANCES:
+            try:
+                url = f"{instance}/api/v1/videos/{video_id}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                data = await asyncio.to_thread(lambda u=req: urllib.request.urlopen(u, timeout=4).read().decode("utf-8"))
+                res_json = json.loads(data)
+                adaptive = res_json.get("adaptiveFormats", [])
+                audio_streams = [f for f in adaptive if f.get("type", "").startswith("audio/")]
+                if audio_streams:
+                    # Choisir le flux avec le plus haut bitrate ou le premier
+                    best_audio = audio_streams[0]
+                    info = {
+                        'title': res_json.get('title', 'Inconnu'),
+                        'url': best_audio.get('url'),
+                        'webpage_url': f"https://www.youtube.com/watch?v={video_id}",
+                        'thumbnail': res_json.get('videoThumbnails', [{}])[0].get('url', ''),
+                        'duration': res_json.get('lengthSeconds', 0),
+                        'uploader': res_json.get('author', 'Inconnu'),
+                    }
+                    print(f"[FLUX OK] Invidious ({instance}) : {info['title']}", flush=True)
+                    return info
+            except Exception:
+                continue
+
+        raise Exception("Tous les serveurs de flux audio (Piped/Invidious) ont echoue.")
     except Exception as e:
-        print(f"[YTDL ERREUR] {e}", flush=True)
+        print(f"[EXTRACTION ERREUR GLOBAL] {e}", flush=True)
         raise e
 
 def fmt_dur(s):
@@ -171,10 +286,9 @@ async def save_memory(user_id, memory_obj, message_id):
         print(f"[MEMOIRE] Erreur sauvegarde : {e}", flush=True)
 
 # ============================================================
-# Appel API Zhipu AI (glm-4-flash)
+# Appel API Zhipu AI
 # ============================================================
 async def call_ai(user_id, username, question, memory_obj):
-    # Detection apprentissage
     import re
     learn_match = re.search(r'(?:souviens-toi|retiens)\s+que\s+(.+)', question, re.IGNORECASE)
     is_learning = False
@@ -184,7 +298,6 @@ async def call_ai(user_id, username, question, memory_obj):
         if new_fact not in memory_obj.get("facts", []):
             memory_obj.setdefault("facts", []).append(new_fact)
 
-    # Prompt systeme optimise pour la concision
     system_prompt = (
         "Tu es un robot amical nommé Antigravity. Réponds de manière EXTRÊMEMENT concise et courte "
         "(maximum 1 ou 2 phrases courtes, moins de 50 mots). Va droit au but, supprime les éléments non importants pour faire court."
@@ -201,11 +314,10 @@ async def call_ai(user_id, username, question, memory_obj):
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": question})
 
-    # Appel API (Limite physique strict max_tokens)
     payload = json.dumps({
         "model": "glm-4-flash",
         "messages": messages,
-        "max_tokens": 150 # Coupe le blabla inutile au bout de 150 tokens (~110 mots)
+        "max_tokens": 150
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -228,7 +340,6 @@ async def call_ai(user_id, username, question, memory_obj):
     except (KeyError, IndexError):
         ai_response = "Désolé, je n'ai pas pu générer de réponse."
 
-    # Sauvegarder historique
     memory_obj.setdefault("history", []).append({"role": "user", "content": question})
     memory_obj["history"].append({"role": "assistant", "content": ai_response})
     if len(memory_obj["history"]) > 10:
@@ -327,7 +438,7 @@ async def play(ctx, *, query: str):
             now_playing[gid] = song
             try:
                 src = discord.PCMVolumeTransformer(
-                    discord.FFmpegPCMAudio(song['url'], **FMPEG_OPTS),
+                    discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTS),
                     volume=get_vol(gid)
                 )
                 ctx.voice_client.play(src, after=lambda e: play_next(ctx.guild))
