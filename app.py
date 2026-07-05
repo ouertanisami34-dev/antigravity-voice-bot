@@ -972,14 +972,50 @@ async def on_message(message):
 async def on_voice_state_update(member, before, after):
     if member.bot: return
     vc = member.guild.voice_client
-    if vc and vc.channel:
-        humans = [m for m in vc.channel.members if not m.bot]
-        if not humans:
-            gid = member.guild.id
-            Q(gid).clear(); loops[gid] = False; now_playing[gid] = None
-            vc.stop(); await vc.disconnect()
-            await bot.change_presence(activity=None)
-            print(f"[AUTO-DC] Plus personne dans le vocal", flush=True)
+    if not vc or not vc.channel: return
+    
+    # Récupérer la liste des humains actuellement dans le salon du bot
+    humans_in_channel = [m for m in vc.channel.members if not m.bot]
+    
+    # CAS 1 : Quelqu'un quitte le salon et il n'y a plus aucun humain
+    if before.channel == vc.channel and after.channel != vc.channel:
+        if len(humans_in_channel) == 0:
+            if vc.is_playing():
+                vc.pause()
+                s = now_playing.get(member.guild.id)
+                if s:
+                    s['pause_start'] = datetime.datetime.now()
+                    # Met à jour le message embed pour dire que c'est en pause
+                    if s.get('embed_message_id'):
+                        try:
+                            ch = bot.get_channel(MUS_CH)
+                            if ch:
+                                msg = await ch.fetch_message(s['embed_message_id'])
+                                await msg.edit(embed=playing_embed(s, is_paused=True, guild_id=member.guild.id))
+                        except Exception: pass
+                print(f"[AUTO-PAUSE] Plus personne dans le vocal, mise en pause.", flush=True)
+
+    # CAS 2 : Quelqu'un rejoint le salon et il y a au moins un humain (le nouveau ou ceux déjà là)
+    if after.channel == vc.channel and before.channel != vc.channel:
+        if len(humans_in_channel) > 0 and vc.is_paused():
+            s = now_playing.get(member.guild.id)
+            if s:
+                if 'pause_start' in s:
+                    # Calcule le temps passé en pause pour pas que la barre de progression bugue
+                    s['paused_duration'] = s.get('paused_duration', 0) + (datetime.datetime.now() - s['pause_start']).total_seconds()
+                    del s['pause_start']
+                
+                # Met à jour le message embed pour dire que ça a repris
+                if s.get('embed_message_id'):
+                    try:
+                        ch = bot.get_channel(MUS_CH)
+                        if ch:
+                            msg = await ch.fetch_message(s['embed_message_id'])
+                            await msg.edit(embed=playing_embed(s, is_paused=False, guild_id=member.guild.id))
+                    except Exception: pass
+            
+            vc.resume()
+            print(f"[AUTO-RESUME] Un humain est de retour, reprise de la lecture.", flush=True)
 
 # ══════════════════════════════════════════════════════════════════════
 bot.run(TOKEN)
